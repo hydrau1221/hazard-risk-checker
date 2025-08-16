@@ -90,13 +90,13 @@ export default function Home() {
 
   // --- styles simples (sans Tailwind) ---
   const s = {
-    header: { background: "#0b396b", color: "white", padding: "28px 16px", textAlign: "center" as const },
+    header: { background: "#121212", color: "white", padding: "28px 16px", textAlign: "center" as const },
     title: { fontSize: 32, margin: 0 },
     subtitle: { opacity: 0.9, marginTop: 8 },
     bar: { display: "flex", justifyContent: "center", gap: 8, marginTop: 16 },
     input: { width: 420, maxWidth: "90vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" },
     btn: { padding: "10px 16px", borderRadius: 6, border: "1px solid #0b396b", background: "#114d8a", color: "white", cursor: "pointer" },
-    gridWrap: { background: "#121212", minHeight: "calc(100vh - 120px)", padding: "28px 16px" },
+    gridWrap: { background: "#e0e0e0", minHeight: "calc(100vh - 120px)", padding: "28px 16px" },
     grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 980, margin: "20px auto" },
     card: { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 24, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" },
     h2: { margin: "0 0 10px 0", fontSize: 22 },
