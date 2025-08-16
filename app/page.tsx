@@ -119,33 +119,34 @@ if (lsRes.status === "fulfilled") {
   const j = await r.json();
 
   if (r.ok) {
-    setLsLevel(j.level as RiskLevel);
+    const lvl = (j.level as RiskLevel) ?? "Undetermined";
+    setLsLevel(lvl);
 
-    // Compose la ligne de détail : label NRI + score LNDS_RISKS + source + lieu
-    const parts: string[] = [];
-    if (j.label) parts.push(j.label); // ex. "Relatively High"
-    if (Number.isFinite(j.score)) {
-      const s = Math.round(Number(j.score) * 10) / 10; // 1 décimale
-      parts.push(`score ${s}`);
-    }
-    if (j.adminUnit) parts.push(`source: ${j.adminUnit}`); // "tract" ou "county"
-    const place = [j.county, j.state].filter(Boolean).join(", ");
-    if (place) parts.push(place);
+    const s =
+      Number.isFinite(Number(j.score))
+        ? Math.round(Number(j.score) * 10) / 10
+        : null;
 
-    const suffix = parts.length ? ` — ${parts.join(" — ")}` : "";
-    const head = j.level === "Undetermined"
-      ? "UNDETERMINED"
-      : `${String(j.level).toUpperCase()} RISK`;
+    const head =
+      lvl === "Undetermined" ? "UNDETERMINED" : `${String(lvl).toUpperCase()} RISK`;
 
-    setLsText(`${head}${suffix}`);
+    const scorePart = s !== null ? ` — score ${s}` : "";
+    const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+
+    // 👉 Texte final, sans label NRI, sans lieu : seulement level + score + source
+    setLsText(`${head} susceptibility${scorePart}${srcPart}`);
   } else if (j?.error === "no feature found at this point") {
-    // Pas de polygone de susceptibilité : on affiche "Very Low" explicite
     setLsLevel("Very Low");
-    setLsText("VERY LOW RISK — outside mapped susceptibility polygons");
+    setLsText("VERY LOW RISK susceptibility — outside mapped polygons");
   } else {
     setLsLevel(null);
-    setLsText(j?.error || "USGS landslide query failed.");
+    setLsText(j?.error || "NRI landslide query failed.");
   }
+} else {
+  setLsLevel(null);
+  setLsText("NRI landslide fetch failed.");
+}
+
 } else {
   setLsLevel(null);
   setLsText("USGS landslide fetch failed.");
