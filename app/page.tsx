@@ -37,16 +37,15 @@ function classifyFlood(features: Feature[] | null): {
   let level: RiskLevel, note = "";
   if (zone.startsWith("VE")) { level = "Very High"; note = "Coastal high hazard (wave action)"; }
   else if (["AO","AH","AE","A","A99"].includes(zone) || zone.startsWith("A1") || zone.startsWith("A2") || zone.startsWith("A3")) {
-    level = "High"; note = "Special Flood Hazard Area (1% annual chance)";
-  } else if (zone === "X" && subty.includes("0.2")) {
-    level = "Moderate"; note = "0.2% annual chance flood (X shaded)";
-  } else if (zone === "X") {
-    level = "Low"; note = "Outside SFHA (Zone X)";
-  } else if (zone === "D") {
-    level = "Undetermined"; note = "Flood data is not available for this parcel (Zone D)";
-  } else {
-    level = inSFHA ? "High" : "Low"; note = "See FEMA NFHL details";
-  }
+    level = "High"; note = "Special Flood Hazard Area (1% annual chance)";}
+  else if (zone === "X" && subty.includes("0.2")) {
+    level = "Moderate"; note = "0.2% annual chance flood (X shaded)"; }
+  else if (zone === "X") {
+    level = "Low"; note = "Outside SFHA (Zone X)"; }
+  else if (zone === "D") {
+    level = "Undetermined"; note = "Flood data is not available for this parcel (Zone D)"; }
+  else {
+    level = inSFHA ? "High" : "Low"; note = "See FEMA NFHL details"; }
   return { level, zone, sfha: inSFHA, bfe, note };
 }
 
@@ -62,7 +61,7 @@ export default function Home() {
   const [eqLevel, setEqLevel] = useState<RiskLevel | null>(null);
   const [eqText, setEqText] = useState<string>("Coming soon");
 
-  // Landslide (FEMA NRI Tract→County)
+  // Landslide
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
   const [lsText, setLsText] = useState<string>("Coming soon");
 
@@ -85,13 +84,13 @@ export default function Home() {
       setLoading("fetch");
       setFloodText("Querying FEMA NFHL…");
       setEqText("Querying USGS (Design Maps)…");
-      setLsText("Querying FEMA NRI (Landslide)…");
+      setLsText("Querying NRI Landslide…");
 
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes] = await Promise.allSettled([
         fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
         fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }), // NEW (NRI)
+        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
       // Flood
@@ -109,48 +108,42 @@ export default function Home() {
       // Earthquake
       if (eqRes.status === "fulfilled") {
         const r = eqRes.value; const j = await r.json();
-        if (r.ok) { setEqLevel(j.level as RiskLevel); setEqText(`${(j.level as string).toUpperCase()} RISK — SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`); }
-        else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
+        if (r.ok) {
+          setEqLevel(j.level as RiskLevel);
+          setEqText(`${(j.level as string).toUpperCase()} RISK — SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`);
+        } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-// Landslide
-if (lsRes.status === "fulfilled") {
-  const r = lsRes.value;
-  const j = await r.json();
+      // Landslide (NRI) — texte simplifié : "<LEVEL> risk susceptibility — score XX.X — source: tract|county"
+      if (lsRes.status === "fulfilled") {
+        const r = lsRes.value; const j = await r.json();
 
-  if (r.ok) {
-    const lvl = (j.level as RiskLevel) ?? "Undetermined";
-    setLsLevel(lvl);
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setLsLevel(lvl);
 
-    const s =
-      Number.isFinite(Number(j.score))
-        ? Math.round(Number(j.score) * 10) / 10
-        : null;
+          const s =
+            Number.isFinite(Number(j.score))
+              ? Math.round(Number(j.score) * 10) / 10
+              : null;
 
-    const head =
-      lvl === "Undetermined" ? "UNDETERMINED" : `${String(lvl).toUpperCase()} RISK`;
+          const head = (lvl === "Undetermined")
+            ? "UNDETERMINED"
+            : `${String(lvl).toUpperCase()} RISK`;
 
-    const scorePart = s !== null ? ` — score ${s}` : "";
-    const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
 
-    // 👉 Texte final, sans label NRI, sans lieu : seulement level + score + source
-    setLsText(`${head} susceptibility${scorePart}${srcPart}`);
-  } else if (j?.error === "no feature found at this point") {
-    setLsLevel("Very Low");
-    setLsText("VERY LOW RISK susceptibility — outside mapped polygons");
-  } else {
-    setLsLevel(null);
-    setLsText(j?.error || "NRI landslide query failed.");
-  }
-} else {
-  setLsLevel(null);
-  setLsText("NRI landslide fetch failed.");
-}
+          setLsText(`${head} susceptibility${scorePart}${srcPart}`);
+        } else {
+          setLsLevel(null);
+          setLsText(j?.error || "NRI landslide query failed.");
+        }
+      } else {
+        setLsLevel(null);
+        setLsText("NRI landslide fetch failed.");
+      }
 
-} else {
-  setLsLevel(null);
-  setLsText("USGS landslide fetch failed.");
-}
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -231,10 +224,7 @@ if (lsRes.status === "fulfilled") {
           {lsCard}
           <section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Wildfire</h2></div><div style={cardBody}><div style={small}>Coming soon</div></div></section>
         </div>
-        <div style={foot}>
-          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) •
-          FEMA NRI (Landslide — Tract/County).
-        </div>
+        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide).</div>
       </main>
     </div>
   );
