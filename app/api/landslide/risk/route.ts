@@ -156,6 +156,16 @@ export async function GET(req: Request) {
     }
   }
 
-  const body = debug ? { error: "Landslide service not available", attempts } : { error: "Landslide service not available" };
-  return new Response(JSON.stringify(body), { status: 502, headers: json() });
+ // Si au moins une tentative renvoie "no feature", on considère que c'est une zone blanche
+if (attempts.some(a => a?.err === "no feature")) {
+  return new Response(
+    JSON.stringify({ error: "no feature found at this point" }),
+    { status: 404, headers: json() }
+  );
 }
+
+const body = debug
+  ? { error: "Landslide service not available", attempts }
+  : { error: "Landslide service not available" };
+return new Response(JSON.stringify(body), { status: 502, headers: json() });
+
