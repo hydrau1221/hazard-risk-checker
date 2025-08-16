@@ -113,25 +113,43 @@ export default function Home() {
         else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Landslide (FEMA NRI Tract→County)
-      if (lsRes.status === "fulfilled") {
-        const r = lsRes.value;
-        const j = await r.json();
-        if (r.ok && !j?.error) {
-          const lvl = (j.level as RiskLevel) ?? "Undetermined";
-          setLsLevel(lvl);
-          const src = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-          const place = j.county && j.state ? ` — ${j.county}, ${j.state}` : "";
-          const detail = j.label ? ` — ${j.label}` : "";
-          setLsText(`${(lvl as string).toUpperCase()} RISK${detail}${src}${place}`);
-        } else {
-          setLsLevel("Undetermined");
-          setLsText(j?.error || "NRI landslide query failed.");
-        }
-      } else {
-        setLsLevel(null);
-        setLsText("NRI landslide fetch failed.");
-      }
+// Landslide
+if (lsRes.status === "fulfilled") {
+  const r = lsRes.value;
+  const j = await r.json();
+
+  if (r.ok) {
+    setLsLevel(j.level as RiskLevel);
+
+    // Compose la ligne de détail : label NRI + score LNDS_RISKS + source + lieu
+    const parts: string[] = [];
+    if (j.label) parts.push(j.label); // ex. "Relatively High"
+    if (Number.isFinite(j.score)) {
+      const s = Math.round(Number(j.score) * 10) / 10; // 1 décimale
+      parts.push(`score ${s}`);
+    }
+    if (j.adminUnit) parts.push(`source: ${j.adminUnit}`); // "tract" ou "county"
+    const place = [j.county, j.state].filter(Boolean).join(", ");
+    if (place) parts.push(place);
+
+    const suffix = parts.length ? ` — ${parts.join(" — ")}` : "";
+    const head = j.level === "Undetermined"
+      ? "UNDETERMINED"
+      : `${String(j.level).toUpperCase()} RISK`;
+
+    setLsText(`${head}${suffix}`);
+  } else if (j?.error === "no feature found at this point") {
+    // Pas de polygone de susceptibilité : on affiche "Very Low" explicite
+    setLsLevel("Very Low");
+    setLsText("VERY LOW RISK — outside mapped susceptibility polygons");
+  } else {
+    setLsLevel(null);
+    setLsText(j?.error || "USGS landslide query failed.");
+  }
+} else {
+  setLsLevel(null);
+  setLsText("USGS landslide fetch failed.");
+}
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
