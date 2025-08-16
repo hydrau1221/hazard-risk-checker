@@ -114,24 +114,26 @@ export default function Home() {
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
       // Landslide
-      if (lsRes.status === "fulfilled") {
-        const r = lsRes.value; const j = await r.json();
-        if (r.ok) {
-          setLsLevel(j.level as RiskLevel);
-          const detail = j.label ? ` — ${j.label}` : (j.value != null ? ` — value ${j.value}` : "");
-          setLsText(`${(j.level as string).toUpperCase()} RISK${detail}`);
-        } else {
-          setLsLevel(null); setLsText(j?.error || "USGS landslide query failed.");
-        }
+if (lsRes.status === "fulfilled") {
+  const r = lsRes.value;
+  const j = await r.json();
+
+  if (r.ok) {
+    setLsLevel(j.level as RiskLevel);
+    const detail = j.label ? ` — ${j.label}` : (j.value != null ? ` — value ${j.value}` : "");
+    setLsText(`${(j.level as string).toUpperCase()} RISK${detail}`);
   } else if (j?.error === "no feature found at this point") {
-    // Pas de polygone de susceptibilité à cet endroit (zone blanche sur la carte)
+    // Pas de polygone de susceptibilité à cet endroit (zone blanche)
     setLsLevel("Very Low");
     setLsText("VERY LOW RISK — outside mapped susceptibility polygons");
   } else {
     setLsLevel(null);
     setLsText(j?.error || "USGS landslide query failed.");
   }
-
+} else {
+  setLsLevel(null);
+  setLsText("USGS landslide fetch failed.");
+}
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
