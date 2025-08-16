@@ -1,6 +1,6 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = ["iad1", "cle1", "pdx1"]; // régions US
+export const preferredRegion = ["iad1", "cle1", "pdx1"];
 
 function json(h: Record<string, string> = {}) {
   return { "content-type": "application/json", "access-control-allow-origin": "*", ...h };
@@ -8,10 +8,11 @@ function json(h: Record<string, string> = {}) {
 
 const UA = "RiskChecker/1.0 (+vercel)";
 
+// 1) on privilégie gis.fema.gov (celui qui répond chez toi)
 const CANDIDATE_BASES = [
-  process.env.NFHL_BASE?.replace(/\/+$/, ""), // ta var d'env si définie (sans / final)
-  "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL",
+  (process.env.NFHL_BASE || "").replace(/\/+$/, ""),
   "https://gis.fema.gov/arcgis/rest/services/NFHL",
+  // "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL", // laissé en backup si besoin
 ].filter(Boolean) as string[];
 
 async function fetchJSON(url: string) {
@@ -23,28 +24,13 @@ async function fetchJSON(url: string) {
   return r.json();
 }
 
-function toUpperNames(fields: any[] = []) {
-  return fields.map((f: any) => String(f.name).toUpperCase());
-}
-
-function scoreLayer(info: any) {
-  const geom = String(info?.geometryType || "").toLowerCase();
-  if (!geom.includes("polygon")) return -1;
-
-  const names = toUpperNames(info?.fields);
+function goodFields(info: any) {
+  const names = (info?.fields || []).map((f: any) => String(f.name).toUpperCase());
   const has = (n: string) => names.includes(n);
-
-  let s = 0;
-  if (has("FLD_ZONE")) s += 5;
-  if (has("SFHA_TF")) s += 3;
-  if (has("ZONE_SUBTY") || has("ZONE_SUBTYPE")) s += 2;
-  if (has("BFE") || has("STATIC_BFE") || has("DEPTH") || has("VE_ZONE")) s += 1;
-
-  const nm = String(info?.name || "").toUpperCase();
-  if (nm === "S_FLD_HAZ_AR") s += 3;
-  if (nm.includes("FLOOD") && nm.includes("HAZARD")) s += 2;
-
-  return s;
+  const geom = String(info?.geometryType || "").toLowerCase();
+  const okGeom = geom.includes("polygon");
+  const okCore = has("FLD_ZONE") && has("SFHA_TF");
+  return okGeom && okCore;
 }
 
 export async function GET(req: Request) {
@@ -54,67 +40,71 @@ export async function GET(req: Request) {
 
   for (const base of CANDIDATE_BASES) {
     try {
-      // Liste des layers
-      const top = await fetchJSON(`${base}/MapServer?f=json`);
-      const layers: any[] = top?.layers ?? [];
-
-      // 1) Essai par nom direct
-      const direct = layers.find((L: any) => {
-        const n = String(L.name).toUpperCase();
-        return n === "S_FLD_HAZ_AR" || n.includes("FLOOD HAZARD ZONES");
-      });
-      if (direct) {
-        const payload: any = {
-          base,
-          layerId: direct.id,
-          name: direct.name,
-          serviceUrl: `${base}/MapServer/${direct.id}`,
-        };
-        if (debug) payload._mode = "direct-name";
-        return new Response(JSON.stringify(payload), { headers: json() });
+      // A) **Chemin court ultra-fiable** : tester directement l’ID 28 (Flood Hazard Zones)
+      try {
+        const info28 = await fetchJSON(`${base}/MapServer/28?f=pjson`);
+        if (goodFields(info28)) {
+          const payload: any = {
+            base,
+            layerId: 28,
+            name: info28?.name || "Flood Hazard Zones",
+            serviceUrl: `${base}/MapServer/28`,
+            _mode: "forced-28",
+          };
+          return new Response(JSON.stringify(payload), { headers: json() });
+        }
+        reports.push({ base, tried: 28, ok: false });
+      } catch (e: any) {
+        reports.push({ base, tried: 28, error: String(e?.message || e) });
       }
 
-      // 2) Fallback — inspection + scoring par champs
-      const leaves = layers.filter((L: any) => !L.subLayerIds || L.subLayerIds.length === 0);
-      const candidates: Array<{ id: number; name: string; score: number }> = [];
+      // B) **Fallback** : lecture de la liste, puis match par nom / scoring si possible
+      const top = await fetchJSON(`${base}/MapServer?f=pjson`); // f=pjson marche mieux sur certains ArcGIS
+      const layers: any[] = top?.layers ?? [];
 
-      for (const L of leaves) {
+      // 1) Nom direct (ex: "Flood Hazard Zones")
+      const direct = layers.find((L: any) =>
+        String(L.name).toUpperCase().includes("FLOOD HAZARD ZONES")
+      );
+      if (direct) {
+        const info = await fetchJSON(`${base}/MapServer/${direct.id}?f=pjson`);
+        if (goodFields(info)) {
+          return new Response(JSON.stringify({
+            base,
+            layerId: direct.id,
+            name: info?.name ?? direct.name,
+            serviceUrl: `${base}/MapServer/${direct.id}`,
+            _mode: "direct-name",
+          }), { headers: json() });
+        }
+      }
+
+      // 2) Dernier recours : balayer quelques IDs probables (20..35)
+      for (let id = 20; id <= 35; id++) {
         try {
-          const info = await fetchJSON(`${base}/MapServer/${L.id}?f=json`);
-          const score = scoreLayer(info);
-          if (score >= 0) candidates.push({ id: L.id, name: info?.name ?? L.name, score });
+          const info = await fetchJSON(`${base}/MapServer/${id}?f=pjson`);
+          if (goodFields(info)) {
+            return new Response(JSON.stringify({
+              base,
+              layerId: id,
+              name: info?.name ?? `Layer ${id}`,
+              serviceUrl: `${base}/MapServer/${id}`,
+              _mode: "scan-range",
+            }), { headers: json() });
+          }
         } catch {}
       }
 
-      candidates.sort((a, b) => b.score - a.score);
-      if (debug) reports.push({ base, topCandidates: candidates.slice(0, 10) });
-
-      const best = candidates[0];
-      if (best && best.score >= 5) {
-        const payload: any = {
-          base,
-          layerId: best.id,
-          name: best.name,
-          serviceUrl: `${base}/MapServer/${best.id}`,
-        };
-        if (debug) payload._mode = "scored";
-        return new Response(JSON.stringify(payload), { headers: json() });
-      }
-      // sinon on essaie la base suivante
+      reports.push({ base, msg: "no suitable layer found by fallback" });
+      // essaie la base suivante si dispo
     } catch (e: any) {
-      if (debug) reports.push({ base, error: String(e?.message || e) });
-      // on passe à l'hôte suivant
+      reports.push({ base, error: String(e?.message || e) });
     }
   }
 
-  if (debug) {
-    return new Response(
-      JSON.stringify({ error: "Could not locate NFHL flood layer on any base.", reports }),
-      { status: 404, headers: json() }
-    );
-  }
-  return new Response(JSON.stringify({ error: "Could not locate NFHL flood layer on any base." }), {
-    status: 404,
-    headers: json(),
-  });
+  const body = debug
+    ? { error: "Could not locate NFHL flood layer on any base.", reports }
+    : { error: "Could not locate NFHL flood layer on any base." };
+
+  return new Response(JSON.stringify(body), { status: 404, headers: json() });
 }
