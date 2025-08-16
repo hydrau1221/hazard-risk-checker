@@ -1,24 +1,21 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function json(h: Record<string, string> = {}) {
-  return { "content-type": "application/json", "access-control-allow-origin": "*", ...h };
-}
-
 type RiskLevel = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined";
+
+function json(h: Record<string, string> = {}) {
+  return {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+    ...h,
+  };
+}
 
 const UA = process.env.LS_UA || "HydrauRiskChecker/1.0 (+server)";
 
-/**
- * ENV attendus (Vercel → Settings → Environment Variables) :
- * - LANDSLIDE_URL  : URL complète du service (MapServer/<layerId> ou ImageServer)
- * - LANDSLIDE_MODE : "feature" (MapServer) ou "image" (ImageServer). Si omis, auto-détection par l’URL.
- * - LANDSLIDE_FIELD (optionnel, mode feature) : nom du champ catégoriel (ex: "CLASS" | "SUSC_CLASS" | "CATEGORY"...)
- * - LANDSLIDE_VALUE_MAP (optionnel, mode image) : JSON mapping valeur->libellé. Par défaut: {"1":"Very Low","2":"Low","3":"Moderate","4":"High","5":"Very High"}
- */
-
+/** Convertit un libellé texte en niveau */
 function toLevelFromLabel(label: string): RiskLevel {
-  const s = (label || "").toLowerCase().trim();
+  const s = (label || "").toLowerCase();
   if (s.includes("very high")) return "Very High";
   if (s === "vh") return "Very High";
   if (s.includes("high")) return "High";
@@ -30,102 +27,125 @@ function toLevelFromLabel(label: string): RiskLevel {
   return "Undetermined";
 }
 
+/** Convertit une valeur raster (1..5) en niveau, avec mapping personnalisable via LANDSLIDE_VALUE_MAP */
 function toLevelFromValue(v: number, mapJson: string | undefined): RiskLevel {
   const fallback = { "1": "Very Low", "2": "Low", "3": "Moderate", "4": "High", "5": "Very High" };
   let map: Record<string, string> = fallback;
-  try { if (mapJson) map = JSON.parse(mapJson); } catch { /* keep fallback */ }
+  try { if (mapJson) map = JSON.parse(mapJson); } catch {}
   const label = map[String(Math.round(v))];
   return label ? toLevelFromLabel(label) : "Undetermined";
+}
+
+async function tryImageServer(url: string, lat: number, lon: number) {
+  const geom = JSON.stringify({ x: lon, y: lat, spatialReference: { wkid: 4326 } });
+  const qs = new URLSearchParams({
+    f: "json",
+    geometry: geom,
+    geometryType: "esriGeometryPoint",
+    sr: "4326",
+    returnGeometry: "false",
+  });
+  const r = await fetch(`${url.replace(/\/+$/,"")}/identify?${qs}`, {
+    headers: { "user-agent": UA, accept: "application/json" },
+    cache: "no-store",
+  });
+  const text = await r.text();
+  let j: any = null; try { j = JSON.parse(text); } catch {}
+  if (!r.ok) return { ok: false, url, status: r.status, err: "identify failed" };
+  const value = j?.value ?? j?.pixelValue ?? j?.catalogItems?.[0]?.value ?? null;
+  if (value == null) return { ok: false, url, status: r.status, err: "no pixel value" };
+  const level = toLevelFromValue(Number(value), process.env.LANDSLIDE_VALUE_MAP);
+  return { ok: true, url, mode: "image", level, value };
+}
+
+async function tryFeatureServerOrMap(url: string, lat: number, lon: number) {
+  const geom = JSON.stringify({ x: lon, y: lat, spatialReference: { wkid: 4326 } });
+  const qs = new URLSearchParams({
+    f: "json",
+    where: "1=1",
+    geometry: geom,
+    geometryType: "esriGeometryPoint",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    returnGeometry: "false",
+    outFields: "*",
+  });
+  const r = await fetch(`${url.replace(/\/+$/,"")}/query?${qs}`, {
+    headers: { "user-agent": UA, accept: "application/json" },
+    cache: "no-store",
+  });
+  const text = await r.text();
+  let j: any = null; try { j = JSON.parse(text); } catch {}
+  if (!r.ok) return { ok: false, url, status: r.status, err: "query failed" };
+  const feats = j?.features || [];
+  if (!feats.length) return { ok: false, url, status: r.status, err: "no feature" };
+  const attrs = feats[0].attributes || {};
+  const prefer = (process.env.LANDSLIDE_FIELD || "CLASS,SUSC_CLASS,SUSCEPTIBILITY,CATEGORY,CLASSNAME,CLASS_NAME,NAME").split(",").map(s => s.trim().toLowerCase());
+  let label = "";
+  for (const k of Object.keys(attrs)) {
+    if (prefer.includes(k.toLowerCase())) { label = String(attrs[k]); break; }
+  }
+  if (!label) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (typeof v === "string" && /(very high|high|moderate|very low|low)/i.test(v)) { label = v; break; }
+    }
+  }
+  const level = toLevelFromLabel(label);
+  return { ok: true, url, mode: "feature", level, label };
 }
 
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const lat = Number(u.searchParams.get("lat"));
   const lon = Number(u.searchParams.get("lon"));
+  const debug = u.searchParams.get("debug") === "1";
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return new Response(JSON.stringify({ error: "lat & lon required" }), { status: 400, headers: json() });
   }
 
-  const baseUrl = (process.env.LANDSLIDE_URL || "").replace(/\/+$/, "");
-  if (!baseUrl) {
-    return new Response(JSON.stringify({
-      error: "Configure LANDSLIDE_URL (MapServer/<layerId> ou ImageServer) et éventuellement LANDSLIDE_MODE.",
-    }), { status: 500, headers: json() });
+  const inputUrl = (process.env.LANDSLIDE_URL || "").replace(/\/+$/,"");
+  if (!inputUrl) {
+    return new Response(JSON.stringify({ error: "Set LANDSLIDE_URL in environment variables." }), { status: 500, headers: json() });
   }
 
-  let mode = (process.env.LANDSLIDE_MODE || "").toLowerCase();
-  if (!mode) {
-    mode = /imageserver/i.test(baseUrl) ? "image" : "feature"; // auto
+  // Construit des candidats si on reçoit une URL “tiles”
+  const candidates = new Set<string>([inputUrl]);
+  if (/\/tiles\//i.test(inputUrl)) {
+    const svc = inputUrl.replace(/\/tiles\//i, "/services/");
+    candidates.add(svc);
+    if (/\/MapServer$/i.test(svc)) candidates.add(svc.replace(/\/MapServer$/i, "/ImageServer"));
+  } else {
+    // Essaie aussi la variante ImageServer/MapServer
+    if (/\/MapServer$/i.test(inputUrl)) candidates.add(inputUrl.replace(/\/MapServer$/i, "/ImageServer"));
+    if (/\/ImageServer$/i.test(inputUrl)) candidates.add(inputUrl.replace(/\/ImageServer$/i, "/MapServer"));
   }
 
-  // ---- MODE FEATURE (polygones) ----
-  if (mode === "feature" || /mapserver/i.test(baseUrl)) {
-    const geom = JSON.stringify({ x: lon, y: lat, spatialReference: { wkid: 4326 } });
-    const params = new URLSearchParams({
-      f: "json",
-      where: "1=1",
-      geometry: geom,
-      geometryType: "esriGeometryPoint",
-      inSR: "4326",
-      spatialRel: "esriSpatialRelIntersects",
-      returnGeometry: "false",
-      outFields: "*",
-    });
-    const r = await fetch(`${baseUrl}/query?${params}`, {
-      headers: { "user-agent": UA, accept: "application/json" },
-      cache: "no-store",
-    });
-    const j = await r.json();
-    if (!r.ok) {
-      return new Response(JSON.stringify({ error: `Landslide feature query failed (${r.status})` }), { status: 502, headers: json() });
-    }
-    if (!j?.features?.length) {
-      return new Response(JSON.stringify({ error: "no feature found at this point" }), { status: 404, headers: json() });
-    }
-    const attrs = j.features[0].attributes || {};
-    // Champ préféré ou heuristique
-    const candidates = (process.env.LANDSLIDE_FIELD || "CLASS,SUSC_CLASS,SUSCEPTIBILITY,CATEGORY,CLASSNAME,CLASS_NAME,NAME").split(",").map(s => s.trim().toLowerCase());
-    let label = "";
-    for (const key of Object.keys(attrs)) {
-      const k = key.toLowerCase();
-      if (candidates.includes(k)) { label = String(attrs[key]); break; }
-    }
-    if (!label) {
-      // fallback: cherche une valeur textuelle contenant low/moderate/high
-      for (const [k, v] of Object.entries(attrs)) {
-        if (typeof v === "string" && /(very high|high|moderate|very low|low)/i.test(v)) { label = v; break; }
+  const attempts: any[] = [];
+  for (const url of candidates) {
+    try {
+      if (/\/ImageServer$/i.test(url)) {
+        const res = await tryImageServer(url, lat, lon);
+        attempts.push(res);
+        if (res.ok) {
+          return new Response(JSON.stringify({ level: res.level, value: res.value, source: "image", serviceUrl: url }), { headers: json() });
+        }
+      } else {
+        // essaie MapServer/FeatureServer
+        const res = await tryFeatureServerOrMap(url, lat, lon);
+        attempts.push(res);
+        if (res.ok) {
+          return new Response(JSON.stringify({ level: res.level, label: res.label, source: "feature", serviceUrl: url }), { headers: json() });
+        }
       }
+    } catch (e: any) {
+      attempts.push({ url, err: String(e?.message || e) });
     }
-    const level = toLevelFromLabel(label);
-    return new Response(JSON.stringify({ level, label, source: "feature" }), { headers: json() });
   }
 
-  // ---- MODE IMAGE (raster) ----
-  if (mode === "image" || /imageserver/i.test(baseUrl)) {
-    const geom = JSON.stringify({ x: lon, y: lat, spatialReference: { wkid: 4326 } });
-    const params = new URLSearchParams({
-      f: "json",
-      geometry: geom,
-      geometryType: "esriGeometryPoint",
-      sr: "4326",
-      returnGeometry: "false",
-    });
-    const r = await fetch(`${baseUrl}/identify?${params}`, {
-      headers: { "user-agent": UA, accept: "application/json" },
-      cache: "no-store",
-    });
-    const j = await r.json();
-    if (!r.ok) {
-      return new Response(JSON.stringify({ error: `Landslide image identify failed (${r.status})` }), { status: 502, headers: json() });
-    }
-    const value = j?.value ?? j?.pixelValue ?? j?.catalogItems?.[0]?.value ?? null;
-    if (value == null) {
-      return new Response(JSON.stringify({ error: "no pixel value at this point" }), { status: 404, headers: json() });
-    }
-    const level = toLevelFromValue(Number(value), process.env.LANDSLIDE_VALUE_MAP);
-    return new Response(JSON.stringify({ level, value, source: "image" }), { headers: json() });
-  }
+  const body = debug
+    ? { error: "No usable landslide service found.", attempts }
+    : { error: "Landslide service not available" };
 
-  return new Response(JSON.stringify({ error: `Unknown LANDSLIDE_MODE: ${mode}` }), { status: 400, headers: json() });
+  return new Response(JSON.stringify(body), { status: 502, headers: json() });
 }
