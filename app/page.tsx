@@ -1,103 +1,145 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+
+type Feature = { attributes: Record<string, any> };
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [layerId, setLayerId] = useState<number | null>(null);
+  const [lat, setLat] = useState("");
+  const [lon, setLon] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<Feature[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/fema/discover");
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error || "Fail to discover layer");
+        setLayerId(j.layerId);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    })();
+  }, []);
+
+  async function check() {
+    setError(null);
+    setResult(null);
+    if (!layerId) return setError("Layer not ready yet.");
+    const latNum = Number(lat);
+    const lonNum = Number(lon);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
+      return setError("Latitude/Longitude invalides.");
+    }
+    setLoading(true);
+    try {
+      const url = `/api/fema/query?lat=${latNum}&lon=${lonNum}&layerId=${layerId}`;
+      const r = await fetch(url);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Query failed");
+      setResult(j.features ?? []);
+      if (!j.features?.length) {
+        setError("Aucune zone trouvée à ces coordonnées (ou hors couverture NFHL).");
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function useMyLocation() {
+    setError(null);
+    if (!navigator.geolocation) return setError("Géolocalisation non supportée.");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLat(String(pos.coords.latitude));
+        setLon(String(pos.coords.longitude));
+      },
+      (err) => setError(err.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  return (
+    <main style={{
+      minHeight: "100vh", background: "#0a0a0a", color: "white",
+      display: "grid", placeItems: "center", padding: "2rem",
+    }}>
+      <div style={{
+        width: "100%", maxWidth: 720, background: "#111", border: "1px solid #222",
+        borderRadius: 16, padding: 24, boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+      }}>
+        <h1 style={{ fontSize: 28, marginBottom: 12 }}>FEMA Flood Risk Checker</h1>
+        <p style={{ opacity: 0.8, marginBottom: 20 }}>
+          Entre une latitude/longitude (WGS84) ou utilise ta position, puis “Check”.
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, marginBottom: 12 }}>
+          <input
+            placeholder="Latitude (ex: 29.951)"
+            value={lat}
+            onChange={(e) => setLat(e.target.value)}
+            style={{ background: "#0f172a", color: "white", border: "1px solid #243057", borderRadius: 12, padding: "10px 12px" }}
+          />
+          <input
+            placeholder="Longitude (ex: -90.071)"
+            value={lon}
+            onChange={(e) => setLon(e.target.value)}
+            style={{ background: "#0f172a", color: "white", border: "1px solid #243057", borderRadius: 12, padding: "10px 12px" }}
+          />
+          <button onClick={useMyLocation}
+            style={{ borderRadius: 12, border: "1px solid #243057", background: "#0b122b", color: "white", padding: "10px 12px", whiteSpace: "nowrap" }}>
+            Ma position
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+          <button onClick={check} disabled={loading}
+            style={{ borderRadius: 12, border: "1px solid #2f855a", background: loading ? "#22543d" : "#1f4335", color: "white", padding: "10px 16px" }}>
+            {loading ? "Recherche…" : "Check"}
+          </button>
+          <span style={{ opacity: 0.7 }}>
+            {layerId !== null ? `Layer S_FLD_HAZ_AR id: ${layerId}` : "Découverte du layer…"}
+          </span>
+        </div>
+
+        {error && (
+          <div style={{ background: "#2d1b1b", border: "1px solid #5a2a2a", padding: 12, borderRadius: 12, marginBottom: 12 }}>
+            {error}
+          </div>
+        )}
+
+        {result && result.length > 0 && (
+          <div style={{ background: "#0e1a2d", border: "1px solid #203659", padding: 16, borderRadius: 12 }}>
+            <h2 style={{ margin: "0 0 8px 0" }}>
+              Résultat ({result.length} feature{result.length > 1 ? "s" : ""})
+            </h2>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {result.map((f, i) => {
+                const a = f.attributes || {};
+                const zone = a.FLD_ZONE ?? a.ZONE ?? a.ZONE_SUBTY ?? a.ZONE_SUBTYPE;
+                const sfha = a.SFHA_TF;
+                const bfe = a.BFE ?? a.STATIC_BFE ?? a.DEPTH ?? a.VE_ZONE ?? null;
+                return (
+                  <li key={i} style={{ marginBottom: 6 }}>
+                    <code>
+                      FLD_ZONE: {String(zone ?? "N/A")} | SFHA_TF: {String(sfha ?? "N/A")} {bfe != null ? `| BFE/DEPTH: ${bfe}` : ""}
+                    </code>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        <p style={{ opacity: 0.6, marginTop: 16, fontSize: 12 }}>
+          ⚠️ Outil informatif. Réf. réglementaire : FIRM/NFHL FEMA.
+        </p>
+      </div>
+    </main>
   );
 }
