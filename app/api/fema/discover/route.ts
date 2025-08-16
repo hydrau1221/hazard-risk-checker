@@ -1,3 +1,4 @@
+// app/api/fema/discover/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["iad1", "cle1", "pdx1"];
@@ -5,54 +6,67 @@ export const preferredRegion = ["iad1", "cle1", "pdx1"];
 function json(h: Record<string, string> = {}) {
   return { "content-type": "application/json", "access-control-allow-origin": "*", ...h };
 }
-
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 RiskChecker/1.0";
+const UA = "RiskChecker/1.0 (+app)";
 
 const CANDIDATE_BASES = [
-  process.env.NFHL_BASE, // ta variable d'env (si présente)
+  process.env.NFHL_BASE, // your env var if set
   "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL",
   "https://gis.fema.gov/arcgis/rest/services/NFHL",
 ].filter(Boolean) as string[];
 
-async function tryFindLayerId(base: string) {
-  // 1) Essai via /find (plus fiable)
-  const findUrl =
-    `${base}/MapServer/find?` +
-    new URLSearchParams({ searchText: "S_FLD_HAZ_AR", searchFields: "name", f: "json" });
-  let r = await fetch(findUrl, { headers: { accept: "application/json", "user-agent": UA }, cache: "no-store" });
-  if (r.ok) {
-    const j = await r.json();
+async function fetchJSON(url: string) {
+  const r = await fetch(url, { headers: { accept: "application/json", "user-agent": UA }, cache: "no-store" });
+  if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+  return r.json();
+}
+
+async function tryFindLayer(base: string) {
+  // 1) Name search via /find
+  try {
+    const findUrl = `${base}/MapServer/find?` + new URLSearchParams({
+      searchText: "S_FLD_HAZ_AR",
+      searchFields: "name",
+      f: "json",
+    });
+    const j = await fetchJSON(findUrl);
     const hit = j?.results?.find((x: any) => String(x.layerName).toUpperCase() === "S_FLD_HAZ_AR");
-    if (hit?.layerId != null) return { layerId: hit.layerId, base };
+    if (hit?.layerId != null) return { base, layerId: hit.layerId, name: "S_FLD_HAZ_AR" };
+  } catch {}
+
+  // 2) List layers, then inspect each for fields
+  const top = await fetchJSON(`${base}/MapServer?f=json`);
+  const layers: any[] = top?.layers ?? [];
+  // Prefer layers whose name contains "FLOOD HAZARD" or equals S_FLD_HAZ_AR
+  const ordered = layers.sort((a, b) => {
+    const an = String(a.name).toUpperCase(), bn = String(b.name).toUpperCase();
+    const aw = (an.includes("FLOOD HAZARD") ? 2 : 0) + (an === "S_FLD_HAZ_AR" ? 3 : 0);
+    const bw = (bn.includes("FLOOD HAZARD") ? 2 : 0) + (bn === "S_FLD_HAZ_AR" ? 3 : 0);
+    return bw - aw;
+  });
+
+  for (const L of ordered) {
+    const info = await fetchJSON(`${base}/MapServer/${L.id}?f=json`);
+    const geom = info?.geometryType || "";
+    const fields: string[] = (info?.fields || []).map((f: any) => String(f.name).toUpperCase());
+    const hasCore = fields.includes("FLD_ZONE") && fields.includes("SFHA_TF");
+    if (geom.includes("Polygon") && hasCore) {
+      return { base, layerId: L.id, name: info?.name ?? L.name };
+    }
   }
 
-  // 2) Fallback: liste des layers et match exact
-  r = await fetch(`${base}/MapServer?f=json`, { headers: { accept: "application/json", "user-agent": UA }, cache: "no-store" });
-  if (!r.ok) throw new Error(`MapServer ${base} non lisible (${r.status})`);
-  const data = await r.json();
-  const layers = data?.layers ?? [];
-  const target = layers.find((l: any) => String(l.name).toUpperCase() === "S_FLD_HAZ_AR");
-  if (target) return { layerId: target.id, base };
-
-  // Info debug utile si rien trouvé
-  const names = layers.map((l: any) => l.name).slice(0, 40);
-  throw new Error(`S_FLD_HAZ_AR not in service. Sample layers: ${names.join(", ")}`);
+  throw new Error("No NFHL flood polygon layer found");
 }
 
 export async function GET() {
   for (const base of CANDIDATE_BASES) {
     try {
-      const found = await tryFindLayerId(base);
-      return new Response(JSON.stringify({ ...found, serviceUrl: `${found.base}/MapServer/${found.layerId}` }), {
-        headers: json(),
-      });
-    } catch (e) {
-      // essaie la base suivante
-    }
+      const found = await tryFindLayer(base);
+      return new Response(JSON.stringify({
+        ...found,
+        serviceUrl: `${found.base}/MapServer/${found.layerId}`,
+      }), { headers: json() });
+    } catch {}
   }
-  return new Response(JSON.stringify({ error: "S_FLD_HAZ_AR not found on any known NFHL service." }), {
-    status: 404,
-    headers: json(),
-  });
+  return new Response(JSON.stringify({ error: "Could not locate NFHL flood layer on any base." }),
+    { status: 404, headers: json() });
 }
