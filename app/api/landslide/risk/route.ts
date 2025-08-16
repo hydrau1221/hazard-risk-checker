@@ -13,7 +13,7 @@ const NRI_COUNTIES =
   process.env.NRI_COUNTIES_URL ??
   "https://services5.arcgis.com/W1uyphp8h2tna3qJ/ArcGIS/rest/services/NRI_GDB_Counties_%282%29/FeatureServer/0";
 
-/** Lis la valeur Landslide Risk Rating dans les attributs, quel que soit le nom exact */
+/** Lis la valeur Landslide Risk Rating quel que soit le nom exact du champ */
 function readNriLandslide(attrs: Record<string, any>): string | null {
   return (
     attrs?.LNDS_RISKR ??
@@ -24,7 +24,7 @@ function readNriLandslide(attrs: Record<string, any>): string | null {
   );
 }
 
-/** Map FEMA → nos 5 niveaux + undetermined */
+/** Map FEMA → tes 5 niveaux + undetermined */
 function mapToFive(raw: string | null | undefined) {
   const s = String(raw ?? "").trim().toLowerCase();
   if (!s) return { level: "Undetermined" as const, label: "No Rating" };
@@ -38,9 +38,9 @@ function mapToFive(raw: string | null | undefined) {
   return { level: "Undetermined" as const, label: raw as string };
 }
 
-/** petite enveloppe ~50–80 m autour du point (en degrés) */
+/** enveloppe ~70 m autour du point (en degrés) */
 function tinyEnvelope(lon: number, lat: number, meters = 70) {
-  const degLat = meters / 111_320;               // ~111.32 km par degré de latitude
+  const degLat = meters / 111_320;
   const degLon = meters / (111_320 * Math.cos((lat * Math.PI) / 180) || 1);
   return {
     xmin: lon - degLon,
@@ -50,13 +50,32 @@ function tinyEnvelope(lon: number, lat: number, meters = 70) {
   };
 }
 
-/** Query ArcGIS FeatureServer avec géométrie enveloppe (plus robuste que le point strict) */
-async function queryEnvelope(
-  feature0Url: string,
-  lon: number,
-  lat: number
-): Promise<{ ok: true; attrs: Record<string, any> | null; url: string } | { ok: false; status: number; url: string; body?: any }> {
-  const env = tinyEnvelope(lon, lat, 70);
+/** Query au POINT (priorité) : spatialRel=Within pour récupérer le polygone qui contient le point */
+async function queryPoint(feature0Url: string, lon: number, lat: number) {
+  const params = new URLSearchParams({
+    f: "json",
+    geometry: JSON.stringify({ x: lon, y: lat }),
+    geometryType: "esriGeometryPoint",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelWithin",
+    outFields: "*",
+    returnGeometry: "false",
+  });
+  const url = `${feature0Url}/query?${params.toString()}`;
+  const r = await fetch(url, { cache: "no-store" });
+  const text = await r.text();
+  let j: any = null;
+  try { j = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+  if (!r.ok) return { ok: false as const, status: r.status, url, body: j ?? text };
+
+  const feat = j?.features?.[0];
+  if (!feat?.attributes) return { ok: true as const, attrs: null, url };
+  return { ok: true as const, attrs: feat.attributes as Record<string, any>, url };
+}
+
+/** Query ENVELOPPE (fallback quand le point strict ne renvoie rien) */
+async function queryEnvelope(feature0Url: string, lon: number, lat: number, meters = 70) {
+  const env = tinyEnvelope(lon, lat, meters);
   const params = new URLSearchParams({
     f: "json",
     geometry: JSON.stringify({
@@ -73,11 +92,11 @@ async function queryEnvelope(
   const text = await r.text();
   let j: any = null;
   try { j = text ? JSON.parse(text) : null; } catch { /* ignore */ }
-  if (!r.ok) return { ok: false, status: r.status, url, body: j ?? text };
+  if (!r.ok) return { ok: false as const, status: r.status, url, body: j ?? text };
 
   const feat = j?.features?.[0];
-  if (!feat?.attributes) return { ok: true, attrs: null, url };
-  return { ok: true, attrs: feat.attributes as Record<string, any>, url };
+  if (!feat?.attributes) return { ok: true as const, attrs: null, url };
+  return { ok: true as const, attrs: feat.attributes as Record<string, any>, url };
 }
 
 export async function GET(req: NextRequest) {
@@ -92,17 +111,22 @@ export async function GET(req: NextRequest) {
 
   const attempts: any[] = [];
 
-  // 1) TRAC T (enveloppe)
-  const tract = await queryEnvelope(NRI_TRACTS, lon, lat);
-  attempts.push({ source: "tract", ...tract });
+  // 1) TRACT — point “within” d’abord
+  const tractPt = await queryPoint(NRI_TRACTS, lon, lat);
+  attempts.push({ source: "tract:point", ...tractPt });
+  let tract = tractPt;
+  if (tractPt.ok && !tractPt.attrs) {
+    const tractEnv = await queryEnvelope(NRI_TRACTS, lon, lat, 70);
+    attempts.push({ source: "tract:envelope", ...tractEnv });
+    tract = tractEnv;
+  }
   if (tract.ok && tract.attrs) {
     const raw = readNriLandslide(tract.attrs);
     const mapped = mapToFive(raw);
     const county = tract.attrs.COUNTY ?? tract.attrs.COUNTY_NAME ?? tract.attrs.NAME ?? null;
     const state  = tract.attrs.STATE ?? tract.attrs.STATE_NAME ?? tract.attrs.ST_ABBR ?? null;
 
-    // On renvoie TOUJOURS le tract s'il existe (même "No Rating"),
-    // pour coller à la "Census Tract View" du NRI.
+    // Toujours renvoyer le TRACT s’il existe (même “No Rating”) pour coller à la Tract View
     const body: any = {
       level: mapped.level, label: mapped.label,
       adminUnit: "tract", county, state,
@@ -112,9 +136,15 @@ export async function GET(req: NextRequest) {
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  // 2) FALLBACK COUNTY (enveloppe aussi, même robustesse)
-  const county = await queryEnvelope(NRI_COUNTIES, lon, lat);
-  attempts.push({ source: "county", ...county });
+  // 2) COUNTY — point “within” puis enveloppe (fallback)
+  const countyPt = await queryPoint(NRI_COUNTIES, lon, lat);
+  attempts.push({ source: "county:point", ...countyPt });
+  let county = countyPt;
+  if (countyPt.ok && !countyPt.attrs) {
+    const countyEnv = await queryEnvelope(NRI_COUNTIES, lon, lat, 70);
+    attempts.push({ source: "county:envelope", ...countyEnv });
+    county = countyEnv;
+  }
   if (county.ok && county.attrs) {
     const raw = readNriLandslide(county.attrs);
     const mapped = mapToFive(raw);
