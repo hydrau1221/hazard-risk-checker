@@ -62,7 +62,7 @@ export default function Home() {
   const [eqLevel, setEqLevel] = useState<RiskLevel | null>(null);
   const [eqText, setEqText] = useState<string>("Coming soon");
 
-  // Landslide
+  // Landslide (FEMA NRI Tract→County)
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
   const [lsText, setLsText] = useState<string>("Coming soon");
 
@@ -85,13 +85,13 @@ export default function Home() {
       setLoading("fetch");
       setFloodText("Querying FEMA NFHL…");
       setEqText("Querying USGS (Design Maps)…");
-      setLsText("Querying USGS Landslide…");
+      setLsText("Querying FEMA NRI (Landslide)…");
 
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes] = await Promise.allSettled([
         fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
         fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }), // NEW (NRI)
       ]);
 
       // Flood
@@ -113,27 +113,25 @@ export default function Home() {
         else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Landslide
-if (lsRes.status === "fulfilled") {
-  const r = lsRes.value;
-  const j = await r.json();
-
-  if (r.ok) {
-    setLsLevel(j.level as RiskLevel);
-    const detail = j.label ? ` — ${j.label}` : (j.value != null ? ` — value ${j.value}` : "");
-    setLsText(`${(j.level as string).toUpperCase()} RISK${detail}`);
-  } else if (j?.error === "no feature found at this point") {
-    // Pas de polygone de susceptibilité à cet endroit (zone blanche)
-    setLsLevel("Very Low");
-    setLsText("VERY LOW RISK — outside mapped susceptibility polygons");
-  } else {
-    setLsLevel(null);
-    setLsText(j?.error || "USGS landslide query failed.");
-  }
-} else {
-  setLsLevel(null);
-  setLsText("USGS landslide fetch failed.");
-}
+      // Landslide (FEMA NRI Tract→County)
+      if (lsRes.status === "fulfilled") {
+        const r = lsRes.value;
+        const j = await r.json();
+        if (r.ok && !j?.error) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setLsLevel(lvl);
+          const src = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          const place = j.county && j.state ? ` — ${j.county}, ${j.state}` : "";
+          const detail = j.label ? ` — ${j.label}` : "";
+          setLsText(`${(lvl as string).toUpperCase()} RISK${detail}${src}${place}`);
+        } else {
+          setLsLevel("Undetermined");
+          setLsText(j?.error || "NRI landslide query failed.");
+        }
+      } else {
+        setLsLevel(null);
+        setLsText("NRI landslide fetch failed.");
+      }
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -214,7 +212,10 @@ if (lsRes.status === "fulfilled") {
           {lsCard}
           <section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Wildfire</h2></div><div style={cardBody}><div style={small}>Coming soon</div></div></section>
         </div>
-        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • USGS Landslide (ArcGIS).</div>
+        <div style={foot}>
+          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) •
+          FEMA NRI (Landslide — Tract/County).
+        </div>
       </main>
     </div>
   );
