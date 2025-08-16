@@ -1,47 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 type Feature = { attributes: Record<string, any> };
 
 export default function Home() {
-  // ✅ par défaut on utilise 28 (Flood Hazard Zones) pour que la page marche même si /discover échoue
-  const [layerId, setLayerId] = useState<number>(28);
-  const [layerSource, setLayerSource] = useState<string>("default-28");
+  // On fixe directement l'ID du layer FEMA (Flood Hazard Zones)
+  const [layerId] = useState<number>(28);
+  const layerSource = "fixed-28";
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Feature[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch("/api/fema/discover", { cache: "no-store" });
-        const j = await r.json();
-        if (r.ok && typeof j?.layerId === "number") {
-          setLayerId(j.layerId);
-          setLayerSource(j._mode || "api");
-        } else {
-          setLayerSource("fallback-28");
-        }
-      } catch {
-        setLayerSource("fallback-28");
-      }
-    })();
-  }, []);
-
   async function check() {
     setError(null);
     setResult(null);
-    if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lon))) {
+    const latNum = Number(lat);
+    const lonNum = Number(lon);
+    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
       setError("Latitude/Longitude invalides.");
       return;
     }
     setLoading(true);
     try {
-      const url = `/api/fema/query?lat=${Number(lat)}&lon=${Number(lon)}&layerId=${layerId}`;
-      const r = await fetch(url, { cache: "no-store" });
+      const r = await fetch(`/api/fema/query?lat=${latNum}&lon=${lonNum}&layerId=${layerId}`, { cache: "no-store" });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Query failed");
       const feats = j.features ?? [];
@@ -74,24 +58,35 @@ export default function Home() {
         <p style={{ opacity: 0.8, marginBottom: 20 }}>Entre une latitude/longitude (WGS84) ou utilise ta position, puis “Check”.</p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, marginBottom: 12 }}>
-          <input placeholder="Latitude (ex: 29.951)" value={lat} onChange={(e) => setLat(e.target.value)}
-            style={{ background: "#0f172a", color: "white", border: "1px solid #243057", borderRadius: 12, padding: "10px 12px" }} />
-          <input placeholder="Longitude (ex: -90.071)" value={lon} onChange={(e) => setLon(e.target.value)}
-            style={{ background: "#0f172a", color: "white", border: "1px solid #243057", borderRadius: 12, padding: "10px 12px" }} />
-          <button onClick={useMyLocation}
-            style={{ borderRadius: 12, border: "1px solid #243057", background: "#0b122b", color: "white", padding: "10px 12px", whiteSpace: "nowrap" }}>
+          <input
+            placeholder="Latitude (ex: 29.951)"
+            value={lat}
+            onChange={(e) => setLat(e.target.value)}
+            style={{ background: "#0f172a", color: "white", border: "1px solid #243057", borderRadius: 12, padding: "10px 12px" }}
+          />
+          <input
+            placeholder="Longitude (ex: -90.071)"
+            value={lon}
+            onChange={(e) => setLon(e.target.value)}
+            style={{ background: "#0f172a", color: "white", border: "1px solid #243057", borderRadius: 12, padding: "10px 12px" }}
+          />
+          <button
+            onClick={useMyLocation}
+            style={{ borderRadius: 12, border: "1px solid #243057", background: "#0b122b", color: "white", padding: "10px 12px", whiteSpace: "nowrap" }}
+          >
             Ma position
           </button>
         </div>
 
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-          <button onClick={check} disabled={loading}
-            style={{ borderRadius: 12, border: "1px solid #2f855a", background: loading ? "#22543d" : "#1f4335", color: "white", padding: "10px 16px" }}>
+          <button
+            onClick={check}
+            disabled={loading}
+            style={{ borderRadius: 12, border: "1px solid #2f855a", background: loading ? "#22543d" : "#1f4335", color: "white", padding: "10px 16px" }}
+          >
             {loading ? "Recherche…" : "Check"}
           </button>
-          <span style={{ opacity: 0.7 }}>
-            Layer id: {layerId} ({layerSource})
-          </span>
+          <span style={{ opacity: 0.7 }}>Layer id: {layerId} ({layerSource})</span>
         </div>
 
         {error && (
@@ -101,8 +96,10 @@ export default function Home() {
         )}
 
         {result && result.length > 0 && (
-          <div style={{ background: "#0e1a2d", border: "1px solid "#203659", padding: 16, borderRadius: 12 }}>
-            <h2 style={{ margin: "0 0 8px 0" }}>Résultat ({result.length} feature{result.length > 1 ? "s" : ""})</h2>
+          <div style={{ background: "#0e1a2d", border: "1px solid #203659", padding: 16, borderRadius: 12 }}>
+            <h2 style={{ margin: "0 0 8px 0" }}>
+              Résultat ({result.length} feature{result.length > 1 ? "s" : ""})
+            </h2>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {result.map((f, i) => {
                 const a = f.attributes || {};
