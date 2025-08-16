@@ -5,66 +5,111 @@ function json(h: Record<string, string> = {}) {
   return { "content-type": "application/json", "access-control-allow-origin": "*", ...h };
 }
 
-// Map SDC -> ton échelle de risque
-function levelFromSDC(sdc: string) {
+const UA = process.env.EQ_USER_AGENT || "HydrauRiskChecker/1.0 (+server)";
+
+type RiskLevel = "Very Low" | "Low" | "Moderate" | "High" | "Very High";
+
+function levelFromSDC(sdc: string): RiskLevel {
   const x = String(sdc || "").toUpperCase();
   if (x === "A") return "Very Low";
   if (x === "B") return "Low";
   if (x === "C") return "Moderate";
   if (x === "D") return "High";
-  // E ou F
-  return "Very High";
+  return "Very High"; // E ou F
+}
+
+async function callUSGS(lat: number, lon: number, edition: "asce7-22" | "asce7-16", siteClass: string) {
+  const endpoint = `https://earthquake.usgs.gov/ws/designmaps/${edition}.json`;
+  const qs = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    riskCategory: "I",
+    siteClass,
+    title: "HydrauRisk",
+  });
+  const r = await fetch(`${endpoint}?${qs}`, {
+    headers: { accept: "application/json", "user-agent": UA },
+    cache: "no-store",
+  });
+  const bodyText = await r.text(); // garde le texte brut pour debug
+  let body: any = null;
+  try { body = JSON.parse(bodyText); } catch { /* ignore */ }
+
+  // Le sdc peut être sous data.sdc ou response.data.sdc selon versions
+  const d = body?.data ?? body?.response?.data ?? null;
+  const sdc = d?.sdc ?? null;
+  const sds = d?.sds ?? null;
+  const sd1 = d?.sd1 ?? null;
+  const pgam = d?.pgam ?? null;
+
+  return {
+    ok: r.ok,
+    status: r.status,
+    edition,
+    siteClass,
+    sdc, sds, sd1, pgam,
+    debug: { // on garde un extrait court et inoffensif
+      hasData: !!d,
+      keys: d ? Object.keys(d).slice(0, 10) : [],
+      message: body?.message || body?.error || null,
+    }
+  };
 }
 
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const lat = Number(u.searchParams.get("lat"));
   const lon = Number(u.searchParams.get("lon"));
-  // Par défaut on prend ASCE 7-22 + Site Class D (usage courant quand inconnu)
-  const edition = (u.searchParams.get("edition") || "asce7-22").toLowerCase(); // "asce7-22" ou "asce7-16"
-  const siteClass = (u.searchParams.get("siteClass") || "D").toUpperCase();    // A,B,BC,C,CD,D,DE,E,Default
+  const debug = u.searchParams.get("debug") === "1";
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return new Response(JSON.stringify({ error: "lat & lon required" }), { status: 400, headers: json() });
   }
 
-  const endpoint = `https://earthquake.usgs.gov/ws/designmaps/${edition}.json`;
-  const qs = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lon),
-    riskCategory: "I",      // <= demandé
-    siteClass,
-    title: "HydrauRisk"
-  });
+  // Ordre d’essai le plus courant et le plus compatible
+  const tries: Array<{edition: "asce7-22"|"asce7-16"; siteClass: string}> = [
+    { edition: "asce7-22", siteClass: "D" },
+    { edition: "asce7-22", siteClass: "Default" },
+    { edition: "asce7-16", siteClass: "D" },
+    { edition: "asce7-16", siteClass: "Default" },
+  ];
 
-  const r = await fetch(`${endpoint}?${qs.toString()}`, {
-    headers: { accept: "application/json", "user-agent": "HydrauRiskChecker/1.0 (+server)" },
-    cache: "no-store",
-  });
-
-  if (!r.ok) {
-    return new Response(JSON.stringify({ error: `USGS Design Maps failed (${r.status})` }), {
-      status: 502, headers: json(),
-    });
+  const attempts: any[] = [];
+  for (const t of tries) {
+    try {
+      const res = await callUSGS(lat, lon, t.edition, t.siteClass);
+      attempts.push(res);
+      if (res.ok && res.sdc) {
+        const level = levelFromSDC(res.sdc);
+        return new Response(JSON.stringify({
+          level,
+          sdc: res.sdc,
+          sds: res.sds,
+          sd1: res.sd1,
+          pgam: res.pgam,
+          edition: t.edition.toUpperCase(),
+          siteClass: t.siteClass,
+          note: "USGS Design Maps (ASCE), Risk Category I",
+        }), { headers: json() });
+      }
+    } catch (e: any) {
+      attempts.push({ edition: t.edition, siteClass: t.siteClass, error: String(e?.message || e) });
+    }
   }
 
-  const j = await r.json();
-  const data = j?.data || {};
-  const sdc = data?.sdc;           // "A"..."F"
-  if (!sdc) {
-    return new Response(JSON.stringify({ error: "No SDC returned from USGS" }), { status: 502, headers: json() });
-  }
+  // si aucune tentative ne renvoie sdc, on renvoie un diagnostic utile
+  const diag = attempts.map(a => ({
+    edition: a.edition,
+    siteClass: a.siteClass,
+    ok: a.ok,
+    status: a.status,
+    sdc: a.sdc ?? null,
+    dbg: a.debug || a.error || null,
+  }));
 
-  const level = levelFromSDC(sdc);
+  const body = debug
+    ? { error: "No SDC returned from USGS after fallbacks.", attempts: diag }
+    : { error: "No SDC returned from USGS" };
 
-  return new Response(JSON.stringify({
-    level,                  // "Very Low" | "Low" | "Moderate" | "High" | "Very High"
-    sdc,                    // A..F
-    sds: data?.sds ?? null, // design spectral accelerations (utile si tu veux)
-    sd1: data?.sd1 ?? null,
-    pgam: data?.pgam ?? null,
-    edition: edition.toUpperCase(), // ASCE7-22 ou ASCE7-16
-    siteClass,
-    note: "USGS Design Maps (ASCE), Risk Category I"
-  }), { headers: json() });
+  return new Response(JSON.stringify(body), { status: 502, headers: json() });
 }
