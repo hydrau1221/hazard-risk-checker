@@ -1,28 +1,22 @@
-"use client";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const preferredRegion = ["iad1", "cle1", "pdx1"];
 
-import { useState } from "react";
+function json(h: Record<string, string> = {}) {
+  return { "content-type": "application/json", "access-control-allow-origin": "*", ...h };
+}
 
-type Feature = { attributes: Record<string, any> };
-
-export default function Home() {
-  // On fixe directement l'ID du layer FEMA (Flood Hazard Zones)
-  const [layerId] = useState<number>(28);
-  const layerSource = "fixed-28";
-  const [lat, setLat] = useState("");
-  const [lon, setLon] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<Feature[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function check() {
-    setError(null);
-    setResult(null);
-    const latNum = Number(lat);
-    const lonNum = Number(lon);
-    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
-      setError("Latitude/Longitude invalides.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const r = await fetch(`/api/fema/query?lat=${latNum}&lon=${lonNum}&layerId=${layerId}`, { cache: "n
+export async function GET() {
+  // On force le service fiable + le layer "Flood Hazard Zones" = 28
+  const base = (process.env.NFHL_BASE || "https://gis.fema.gov/arcgis/rest/services/NFHL").replace(/\/+$/, "");
+  return new Response(
+    JSON.stringify({
+      base,
+      layerId: 28,
+      name: "Flood Hazard Zones",
+      serviceUrl: `${base}/MapServer/28`,
+      _mode: "hardcoded-28"
+    }),
+    { headers: json() }
+  );
+}
