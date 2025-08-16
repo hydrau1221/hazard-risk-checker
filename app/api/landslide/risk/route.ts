@@ -39,13 +39,21 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
 
 /** Extrait RISKR (catégorie officielle) + RISKS (score, info). */
 function extract(attrs: Record<string, any>) {
-  const riskR = findAttr(attrs, [/(_|^)LNDS.*_RISKR$/i, /LANDSLIDE.*RISK.*RATING/i]);
-  const riskS = findAttr(attrs, [/(_|^)LNDS.*_RISKS$/i, /RISK(_|)SCORE$/i]);
+  const riskR = findAttr(attrs, [
+    /(^|_)LNDS.*_RISKR$/i,                // …LNDS_RISKR
+    /LANDSLIDE.*RISK.*RATING/i            // variations textuelles longues
+  ]);
+  const riskS = findAttr(attrs, [
+    /(^|_)LNDS.*_RISKS$/i,                // …LNDS_RISKS
+    /RISK(_|)SCORE$/i
+  ]);
+
   const level = mapLabelToFive(riskR?.value);
   const score =
     typeof riskS?.value === "number" && Number.isFinite(riskS.value)
       ? (riskS!.value <= 1.5 ? riskS!.value * 100 : riskS!.value)
       : null;
+
   return {
     level,
     label: riskR?.value == null ? null : String(riskR.value),
@@ -123,20 +131,51 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
   return { pick: null as any, attempts };
 }
 
+/** Géocode interne via /api/geocode (même domaine) */
+async function geocodeFromAddress(req: NextRequest, address: string) {
+  const origin = new URL(req.url).origin;
+  const url = `${origin}/api/geocode?address=${encodeURIComponent(address)}`;
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`geocode failed: ${r.status}`);
+  const j = await r.json();
+  if (!j || typeof j.lat !== "number" || typeof j.lon !== "number") {
+    throw new Error("geocode returned invalid lat/lon");
+  }
+  return { lat: j.lat as number, lon: j.lon as number, geocode: j };
+}
+
 export async function GET(req: NextRequest) {
   const u = new URL(req.url);
-  const lat = Number(u.searchParams.get("lat"));
-  const lon = Number(u.searchParams.get("lon"));
   const debug = u.searchParams.get("debug") === "1";
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+  // 1) Récupérer lat/lon OU résoudre address= via /api/geocode
+  let lat = u.searchParams.get("lat");
+  let lon = u.searchParams.get("lon");
+  const address = u.searchParams.get("address");
+
+  let latNum: number, lonNum: number;
+  let geocodeInfo: any = null;
+
+  try {
+    if (address && (!lat || !lon)) {
+      const g = await geocodeFromAddress(req, address);
+      latNum = g.lat; lonNum = g.lon; geocodeInfo = g.geocode;
+    } else {
+      latNum = Number(lat);
+      lonNum = Number(lon);
+    }
+  } catch (e: any) {
+    return Response.json({ error: e?.message || "geocode error" }, { status: 400 });
+  }
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
     return Response.json({ error: "Missing lat/lon" }, { status: 400 });
   }
 
   const steps: any[] = [];
 
-  // 1) TRACT (priorité)
-  const tractTry = await pickFeature(NRI_TRACTS, lon, lat);
+  // 2) TRACT (priorité)
+  const tractTry = await pickFeature(NRI_TRACTS, lonNum, latNum);
   steps.push({ unit: "tract", attempts: tractTry.attempts });
   if (tractTry.pick && tractTry.pick.ok && tractTry.pick.attrs) {
     const attrs = tractTry.pick.attrs as Record<string, any>;
@@ -152,12 +191,19 @@ export async function GET(req: NextRequest) {
       county, state,
       provider: "FEMA National Risk Index (tract)"
     };
-    if (debug) body.debug = { steps, usedFields: out.usedFields };
+    if (debug) {
+      body.debug = {
+        geocode: geocodeInfo ?? null,
+        steps,
+        usedFields: out.usedFields,
+        attrKeys: Object.keys(attrs).sort() // => pour vérifier le nom exact des champs
+      };
+    }
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  // 2) COUNTY (fallback)
-  const countyTry = await pickFeature(NRI_COUNTIES, lon, lat);
+  // 3) COUNTY (fallback)
+  const countyTry = await pickFeature(NRI_COUNTIES, lonNum, latNum);
   steps.push({ unit: "county", attempts: countyTry.attempts });
   if (countyTry.pick && countyTry.pick.ok && countyTry.pick.attrs) {
     const attrs = countyTry.pick.attrs as Record<string, any>;
@@ -173,10 +219,19 @@ export async function GET(req: NextRequest) {
       county: countyName, state,
       provider: "FEMA National Risk Index (county)"
     };
-    if (debug) body.debug = { steps, usedFields: out.usedFields };
+    if (debug) {
+      body.debug = {
+        geocode: geocodeInfo ?? null,
+        steps,
+        usedFields: out.usedFields,
+        attrKeys: Object.keys(attrs).sort()
+      };
+    }
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  if (debug) return Response.json({ error: "NRI landslide not available", steps }, { status: 502 });
-  return Response.json({ level: "Undetermined", label: "No Rating", provider: "FEMA NRI" });
+  // 4) Rien
+  const res: any = { level: "Undetermined", label: "No Rating", provider: "FEMA NRI" };
+  if (debug) res.debug = { geocode: geocodeInfo ?? null, steps };
+  return Response.json(res);
 }
