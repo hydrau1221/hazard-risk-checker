@@ -25,7 +25,7 @@ function mapScoreCustom(scoreRaw: number): Five {
   if (!Number.isFinite(s)) return "Undetermined";
 
   if (s < 40) return "Very Low";
-  if (s < 75) return "Low";
+  if (s < 76) return "Low";
   if (s < 90) return "Moderate";
   if (s <= 99) return "High";
   return "Very High"; // > 99
