@@ -6,10 +6,11 @@ export const dynamic = "force-dynamic";
 
 const NRI_TRACTS =
   process.env.NRI_TRACTS_URL ??
-  "https://hazards.geoplatform.gov/server/rest/services/Hosted/NRI_Tracts_%28October_2020%29/FeatureServer/0";
+  "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0";
+
 const NRI_COUNTIES =
   process.env.NRI_COUNTIES_URL ??
-  "https://hazards.geoplatform.gov/server/rest/services/Hosted/NRI_Counties_%28October_2020%29/FeatureServer/0";
+  "https://services5.arcgis.com/W1uyphp8h2tna3qJ/ArcGIS/rest/services/NRI_GDB_Counties_%282%29/FeatureServer/0";
 
 // --- helpers ---
 function readNriLandslide(attrs: Record<string, any>): string | null {
