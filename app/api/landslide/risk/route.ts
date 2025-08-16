@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** NRI FEMA sur ArcGIS Online (miroirs publics) */
 const NRI_TRACTS =
   process.env.NRI_TRACTS_URL ??
   "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0";
@@ -12,7 +13,7 @@ const NRI_COUNTIES =
   process.env.NRI_COUNTIES_URL ??
   "https://services5.arcgis.com/W1uyphp8h2tna3qJ/ArcGIS/rest/services/NRI_GDB_Counties_%282%29/FeatureServer/0";
 
-// --- helpers ---
+/** Lis la valeur Landslide Risk Rating dans les attributs, quel que soit le nom exact */
 function readNriLandslide(attrs: Record<string, any>): string | null {
   return (
     attrs?.LNDS_RISKR ??
@@ -22,58 +23,61 @@ function readNriLandslide(attrs: Record<string, any>): string | null {
     null
   );
 }
+
+/** Map FEMA → nos 5 niveaux + undetermined */
 function mapToFive(raw: string | null | undefined) {
   const s = String(raw ?? "").trim().toLowerCase();
   if (!s) return { level: "Undetermined" as const, label: "No Rating" };
-  if (s.includes("very high")) return { level: "Very High" as const, label: "Very High" };
-  if (s.includes("relatively high")) return { level: "High" as const, label: "Relatively High" };
-  if (s.includes("relatively moderate")) return { level: "Moderate" as const, label: "Relatively Moderate" };
-  if (s.includes("relatively low")) return { level: "Low" as const, label: "Relatively Low" };
-  if (s.includes("very low")) return { level: "Very Low" as const, label: "Very Low" };
-  if (s.includes("no rating") || s.includes("insufficient") || s.includes("not applicable")) {
+  if (s.includes("very high"))        return { level: "Very High" as const, label: "Very High" };
+  if (s.includes("relatively high"))  return { level: "High" as const,      label: "Relatively High" };
+  if (s.includes("relatively moderate")) return { level: "Moderate" as const,  label: "Relatively Moderate" };
+  if (s.includes("relatively low"))   return { level: "Low" as const,       label: "Relatively Low" };
+  if (s.includes("very low"))         return { level: "Very Low" as const,  label: "Very Low" };
+  if (s.includes("no rating") || s.includes("insufficient") || s.includes("not applicable"))
     return { level: "Undetermined" as const, label: raw as string };
-  }
   return { level: "Undetermined" as const, label: raw as string };
 }
 
-// Entêtes “navigateur” → certains serveurs .gov en tiennent compte
-const REQUEST_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept": "application/json,*/*",
-  "Referer": "https://hazards.fema.gov/",
-  "Origin": "https://hazards.fema.gov"
-};
+/** petite enveloppe ~50–80 m autour du point (en degrés) */
+function tinyEnvelope(lon: number, lat: number, meters = 70) {
+  const degLat = meters / 111_320;               // ~111.32 km par degré de latitude
+  const degLon = meters / (111_320 * Math.cos((lat * Math.PI) / 180) || 1);
+  return {
+    xmin: lon - degLon,
+    ymin: lat - degLat,
+    xmax: lon + degLon,
+    ymax: lat + degLat,
+  };
+}
 
-async function queryAtPoint(base0: string, lon: number, lat: number) {
+/** Query ArcGIS FeatureServer avec géométrie enveloppe (plus robuste que le point strict) */
+async function queryEnvelope(
+  feature0Url: string,
+  lon: number,
+  lat: number
+): Promise<{ ok: true; attrs: Record<string, any> | null; url: string } | { ok: false; status: number; url: string; body?: any }> {
+  const env = tinyEnvelope(lon, lat, 70);
   const params = new URLSearchParams({
     f: "json",
-    geometry: JSON.stringify({ x: lon, y: lat }),
-    geometryType: "esriGeometryPoint",
+    geometry: JSON.stringify({
+      xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax, spatialReference: { wkid: 4326 }
+    }),
+    geometryType: "esriGeometryEnvelope",
     inSR: "4326",
     spatialRel: "esriSpatialRelIntersects",
     outFields: "*",
     returnGeometry: "false",
   });
-  const url = `${base0}/query?${params.toString()}`;
-  const out: any = { url, ok: false as boolean, status: 0 };
+  const url = `${feature0Url}/query?${params.toString()}`;
+  const r = await fetch(url, { cache: "no-store" });
+  const text = await r.text();
+  let j: any = null;
+  try { j = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+  if (!r.ok) return { ok: false, status: r.status, url, body: j ?? text };
 
-  try {
-    const r = await fetch(url, { cache: "no-store", headers: REQUEST_HEADERS });
-    out.status = r.status;
-    const text = await r.text();
-    let j: any = null;
-    try { j = text ? JSON.parse(text) : null; } catch {/* ignore */}
-    out.body = j ?? text ?? null;
-
-    if (!r.ok) return out;
-    const feat = j?.features?.[0];
-    if (!feat?.attributes) { out.ok = true; out.attrs = null; return out; }
-    out.ok = true; out.attrs = feat.attributes; return out;
-  } catch (e: any) {
-    out.err = e?.message || String(e);
-    return out;
-  }
+  const feat = j?.features?.[0];
+  if (!feat?.attributes) return { ok: true, attrs: null, url };
+  return { ok: true, attrs: feat.attributes as Record<string, any>, url };
 }
 
 export async function GET(req: NextRequest) {
@@ -88,37 +92,44 @@ export async function GET(req: NextRequest) {
 
   const attempts: any[] = [];
 
-  // 1) Tract
-  const t = await queryAtPoint(NRI_TRACTS, lon, lat);
-  attempts.push({ source: "tract", ...t });
-  if (t.ok && t.attrs) {
-    const raw = readNriLandslide(t.attrs);
+  // 1) TRAC T (enveloppe)
+  const tract = await queryEnvelope(NRI_TRACTS, lon, lat);
+  attempts.push({ source: "tract", ...tract });
+  if (tract.ok && tract.attrs) {
+    const raw = readNriLandslide(tract.attrs);
     const mapped = mapToFive(raw);
-    if (mapped.level !== "Undetermined") {
-      const county = t.attrs.COUNTY ?? t.attrs.COUNTY_NAME ?? t.attrs.NAME ?? null;
-      const state  = t.attrs.STATE ?? t.attrs.STATE_NAME ?? t.attrs.ST_ABBR ?? null;
-      const body: any = { level: mapped.level, label: mapped.label, adminUnit: "tract", county, state,
-        provider: "FEMA National Risk Index (tract)" };
-      if (debug) body.debug = { attempts, raw };
-      return Response.json(body, { headers: { "cache-control": "no-store" } });
-    }
-  }
+    const county = tract.attrs.COUNTY ?? tract.attrs.COUNTY_NAME ?? tract.attrs.NAME ?? null;
+    const state  = tract.attrs.STATE ?? tract.attrs.STATE_NAME ?? tract.attrs.ST_ABBR ?? null;
 
-  // 2) County fallback
-  const c = await queryAtPoint(NRI_COUNTIES, lon, lat);
-  attempts.push({ source: "county", ...c });
-  if (c.ok && c.attrs) {
-    const raw = readNriLandslide(c.attrs);
-    const mapped = mapToFive(raw);
-    const county = c.attrs.COUNTY ?? c.attrs.COUNTY_NAME ?? c.attrs.NAME ?? null;
-    const state  = c.attrs.STATE ?? c.attrs.STATE_NAME ?? c.attrs.ST_ABBR ?? null;
-    const body: any = { level: mapped.level, label: mapped.label, adminUnit: "county", county, state,
-      provider: "FEMA National Risk Index (county)" };
+    // On renvoie TOUJOURS le tract s'il existe (même "No Rating"),
+    // pour coller à la "Census Tract View" du NRI.
+    const body: any = {
+      level: mapped.level, label: mapped.label,
+      adminUnit: "tract", county, state,
+      provider: "FEMA National Risk Index (tract)"
+    };
     if (debug) body.debug = { attempts, raw };
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  // 3) Rien
+  // 2) FALLBACK COUNTY (enveloppe aussi, même robustesse)
+  const county = await queryEnvelope(NRI_COUNTIES, lon, lat);
+  attempts.push({ source: "county", ...county });
+  if (county.ok && county.attrs) {
+    const raw = readNriLandslide(county.attrs);
+    const mapped = mapToFive(raw);
+    const countyName = county.attrs.COUNTY ?? county.attrs.COUNTY_NAME ?? county.attrs.NAME ?? null;
+    const state      = county.attrs.STATE ?? county.attrs.STATE_NAME ?? county.attrs.ST_ABBR ?? null;
+    const body: any = {
+      level: mapped.level, label: mapped.label,
+      adminUnit: "county", county: countyName, state,
+      provider: "FEMA National Risk Index (county)"
+    };
+    if (debug) body.debug = { attempts, raw };
+    return Response.json(body, { headers: { "cache-control": "no-store" } });
+  }
+
+  // 3) Rien trouvé
   if (debug) return Response.json({ error: "NRI landslide not available", attempts }, { status: 502 });
   return Response.json({ level: "Undetermined", label: "No Rating", provider: "FEMA NRI" });
 }
