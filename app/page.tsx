@@ -123,9 +123,14 @@ export default function Home() {
         } else {
           setLsLevel(null); setLsText(j?.error || "USGS landslide query failed.");
         }
-      } else {
-        setLsLevel(null); setLsText("USGS landslide fetch failed.");
-      }
+  } else if (j?.error === "no feature found at this point") {
+    // Pas de polygone de susceptibilité à cet endroit (zone blanche sur la carte)
+    setLsLevel("Very Low");
+    setLsText("VERY LOW RISK — outside mapped susceptibility polygons");
+  } else {
+    setLsLevel(null);
+    setLsText(j?.error || "USGS landslide query failed.");
+  }
 
     } catch (e: any) {
       setError(e.message || String(e));
