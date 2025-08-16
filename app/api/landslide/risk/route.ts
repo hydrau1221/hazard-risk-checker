@@ -4,48 +4,36 @@ import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** NRI – services publics (AGOL) */
+/**
+ * FEMA National Risk Index (NRI) — ArcGIS Online mirrors (public).
+ * Pas d’ENV requis (tu peux surcharger via NRI_TRACTS_URL / NRI_COUNTIES_URL si tu veux).
+ */
 const NRI_TRACTS =
   process.env.NRI_TRACTS_URL ??
   "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0";
+
 const NRI_COUNTIES =
   process.env.NRI_COUNTIES_URL ??
   "https://services5.arcgis.com/W1uyphp8h2tna3qJ/ArcGIS/rest/services/NRI_GDB_Counties_%282%29/FeatureServer/0";
 
 type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined";
 
-/** 1) Tes seuils custom (score en 0–100) */
-function mapScoreCustom(scoreRaw: number): Five {
-  // Clamp 0–100 et normalise si on reçoit 0–1
-  const s = (() => {
-    if (!Number.isFinite(scoreRaw)) return NaN;
-    if (scoreRaw <= 1.5) return Math.max(0, Math.min(100, scoreRaw * 100)); // 0–1 -> 0–100
-    return Math.max(0, Math.min(100, scoreRaw));
-  })();
-  if (!Number.isFinite(s)) return "Undetermined";
-
-  if (s < 40) return "Very Low";
-  if (s < 76) return "Low";
-  if (s < 90) return "Moderate";
-  if (s <= 99) return "High";
-  return "Very High"; // > 99
-}
-
-/** 2) Mapping "au cas où" depuis le libellé texte */
-function mapLabelFallback(raw: unknown): Five {
+/** Mappe le libellé NRI (RISKR) → nos 5 niveaux, SANS recalcul depuis le score. */
+function mapLabelToFive(raw: unknown): Five {
   if (raw == null) return "Undetermined";
   const s = String(raw).toLowerCase().replace(/[\s_\-()/]+/g, "");
-  if (s.includes("veryhigh")) return "Very High";
-  if (s.includes("relativelyhigh") || s === "high" || s === "h") return "High";
-  if (s.includes("relativelymoderate") || s === "moderate" || s === "m") return "Moderate";
-  if (s.includes("relativelylow") || s === "low" || s === "l") return "Low";
-  if (s.includes("verylow") || s === "vl") return "Very Low";
-  if (s.includes("insufficient") || s.includes("norating") || s.includes("notapplicable")) return "Undetermined";
+  if (s.includes("veryhigh"))        return "Very High";
+  if (s.includes("relativelyhigh"))  return "High";
+  if (s.includes("relativelymoderate")) return "Moderate";
+  if (s.includes("relativelylow"))   return "Low";
+  if (s.includes("verylow"))         return "Very Low";
+  if (s.includes("insufficient") || s.includes("norating") || s.includes("notapplicable"))
+    return "Undetermined";
   return "Undetermined";
 }
 
-/** util: trouve une clé d’attribut par motif (gère les préfixes NRI_...) */
-function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
+/** Trouve une clé d’attribut par motif (gère les préfixes ex. NRI_CensusTracts_LNDS_RISKR). */
+function findAttr(attrs: Record<string, any>, patterns: RegExp[]): { key: string; value: any } | null {
   for (const k of Object.keys(attrs)) {
     const up = k.toUpperCase();
     if (patterns.some(rx => rx.test(up))) return { key: k, value: attrs[k] };
@@ -53,39 +41,35 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   return null;
 }
 
-/** 3) Extraction — priorité au SCORE (tes seuils), fallback libellé si score manquant */
-function extractLandslide(attrs: Record<string, any>) {
-  const score = findAttr(attrs, [/(_|^)LNDS.*_RISKS$/i, /RISK(_|)SCORE$/i]);
-  const label = findAttr(attrs, [/(_|^)LNDS.*_RISKR$/i, /LANDSLIDE.*RISK.*RATING/i]);
+/** Extrait la catégorie officielle (RISKR). Le score (RISKS) n’est renvoyé qu’à titre informatif. */
+function extractFromAttrs(attrs: Record<string, any>) {
+  const riskR = findAttr(attrs, [/(_|^)LNDS.*_RISKR$/i, /LANDSLIDE.*RISK.*RATING/i]); // libellé
+  const riskS = findAttr(attrs, [/(_|^)LNDS.*_RISKS$/i, /RISK(_|)SCORE$/i]);         // score (info uniquement)
 
-  let level: Five = "Undetermined";
-  let normScore: number | null = null;
+  const label = riskR?.value ?? null;
+  const level: Five = mapLabelToFive(label);
 
-  if (typeof score?.value === "number" && Number.isFinite(score.value)) {
-    level = mapScoreCustom(score.value);
-    normScore = score.value <= 1.5 ? score.value * 100 : score.value;
-  } else {
-    level = mapLabelFallback(label?.value);
-  }
+  const score =
+    typeof riskS?.value === "number" && Number.isFinite(riskS.value)
+      ? (riskS!.value <= 1.5 ? riskS!.value * 100 : riskS!.value) // normalise 0–1 → 0–100 si besoin
+      : null;
 
   return {
     level,
-    label: label?.value == null ? null : String(label.value),
-    score: normScore,
-    usedFields: {
-      scoreField: score?.key ?? null,
-      labelField: label?.key ?? null,
-      decidedBy: typeof score?.value === "number" ? "score" : "label"
-    }
+    label: label == null ? null : String(label),
+    score,
+    usedFields: { labelField: riskR?.key ?? null, scoreField: riskS?.key ?? null }
   };
 }
 
-/** 4) Sélection spatiale robuste */
+/** Envelope ~50 m pour robustesse aux bords (dernier recours). */
 function tinyEnvelope(lon: number, lat: number, meters = 50) {
   const degLat = meters / 111_320;
   const degLon = meters / (111_320 * Math.cos((lat * Math.PI) / 180) || 1);
   return { xmin: lon - degLon, ymin: lat - degLat, xmax: lon + degLon, ymax: lat + degLat };
 }
+
+/** Query générique (POINT/ENVELOPE + spatialRel). */
 async function queryGeneric(feature0Url: string, paramsObj: Record<string, any>) {
   const params = new URLSearchParams({
     f: "json",
@@ -102,8 +86,10 @@ async function queryGeneric(feature0Url: string, paramsObj: Record<string, any>)
   const feat = j?.features?.[0];
   return { ok: true as const, url, attrs: feat?.attributes ?? null };
 }
+
+/** Stratégie “best effort” : POINT Within → POINT Intersects → ENVELOPE Intersects. */
 async function bestEffortPick(feature0Url: string, lon: number, lat: number) {
-  // 1) Point WITHIN
+  // 1) Point WITHIN (polygone qui contient le point)
   const pWithin = await queryGeneric(feature0Url, {
     geometry: JSON.stringify({ x: lon, y: lat }),
     geometryType: "esriGeometryPoint",
@@ -112,7 +98,7 @@ async function bestEffortPick(feature0Url: string, lon: number, lat: number) {
   });
   if (pWithin.ok && pWithin.attrs) return { pick: pWithin, attempts: [{ step: "point:within", url: pWithin.url }] };
 
-  // 2) Point INTERSECTS
+  // 2) Point INTERSECTS (certains services ne répondent qu'en intersects)
   const pInter = await queryGeneric(feature0Url, {
     geometry: JSON.stringify({ x: lon, y: lat }),
     geometryType: "esriGeometryPoint",
@@ -124,7 +110,7 @@ async function bestEffortPick(feature0Url: string, lon: number, lat: number) {
     { step: "point:intersects", url: pInter.url }
   ] };
 
-  // 3) Envelope INTERSECTS (~50 m)
+  // 3) ENVELOPE (~50 m) INTERSECTS
   const env = tinyEnvelope(lon, lat, 50);
   const eInter = await queryGeneric(feature0Url, {
     geometry: JSON.stringify({ xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax, spatialReference: { wkid: 4326 } }),
@@ -142,31 +128,31 @@ async function bestEffortPick(feature0Url: string, lon: number, lat: number) {
   };
 }
 
-/** 5) Handler */
 export async function GET(req: NextRequest) {
   const u = new URL(req.url);
   const lat = Number(u.searchParams.get("lat"));
   const lon = Number(u.searchParams.get("lon"));
   const debug = u.searchParams.get("debug") === "1";
+
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return Response.json({ error: "Missing lat/lon" }, { status: 400 });
   }
 
   const steps: any[] = [];
 
-  // --- Tract (priorité) ---
+  // --- 1) Census Tract (priorité) ---
   const tractTry = await bestEffortPick(NRI_TRACTS, lon, lat);
   steps.push({ unit: "tract", attempts: tractTry.attempts });
   if (tractTry.pick && tractTry.pick.ok && tractTry.pick.attrs) {
     const attrs = tractTry.pick.attrs as Record<string, any>;
-    const out = extractLandslide(attrs);
+    const out = extractFromAttrs(attrs);
     const county = attrs.COUNTY ?? attrs.COUNTY_NAME ?? attrs.NAME ?? null;
     const state  = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
     const body: any = {
-      level: out.level,                // calculé via score (tes seuils) si dispo
-      label: out.label,                // libellé NRI (info)
-      score: out.score,                // 0–100 si dispo
+      level: out.level,          // EXACT match NRI via RISKR
+      label: out.label,          // ex. "Relatively Moderate"
+      score: out.score,          // facultatif (info)
       adminUnit: "tract",
       county, state,
       provider: "FEMA National Risk Index (tract)"
@@ -175,12 +161,12 @@ export async function GET(req: NextRequest) {
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  // --- County (fallback) ---
+  // --- 2) County (fallback) ---
   const countyTry = await bestEffortPick(NRI_COUNTIES, lon, lat);
   steps.push({ unit: "county", attempts: countyTry.attempts });
   if (countyTry.pick && countyTry.pick.ok && countyTry.pick.attrs) {
     const attrs = countyTry.pick.attrs as Record<string, any>;
-    const out = extractLandslide(attrs);
+    const out = extractFromAttrs(attrs);
     const countyName = attrs.COUNTY ?? attrs.COUNTY_NAME ?? attrs.NAME ?? null;
     const state      = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
@@ -196,6 +182,7 @@ export async function GET(req: NextRequest) {
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
+  // --- 3) Rien trouvé ---
   if (debug) return Response.json({ error: "NRI landslide not available", steps }, { status: 502 });
   return Response.json({ level: "Undetermined", label: "No Rating", provider: "FEMA NRI" });
 }
