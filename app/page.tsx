@@ -96,7 +96,7 @@ export default function Home() {
     bar: { display: "flex", justifyContent: "center", gap: 8, marginTop: 16 },
     input: { width: 420, maxWidth: "90vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" },
     btn: { padding: "10px 16px", borderRadius: 6, border: "1px solid #0b396b", background: "#114d8a", color: "white", cursor: "pointer" },
-    gridWrap: { background: "#eef2f6", minHeight: "calc(100vh - 120px)", padding: "28px 16px" },
+    gridWrap: { background: "#121212", minHeight: "calc(100vh - 120px)", padding: "28px 16px" },
     grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 980, margin: "20px auto" },
     card: { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 24, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" },
     h2: { margin: "0 0 10px 0", fontSize: 22 },
@@ -108,8 +108,8 @@ export default function Home() {
   return (
     <div>
       <header style={s.header}>
-        <h1 style={s.title}>Hydrau Risk Checker</h1>
-        <div style={s.subtitle}>Enter your address to check your flood risk</div>
+        <h1 style={s.title}>Risk Checker Map</h1>
+        <div style={s.subtitle}>Enter your address to check your risk exposure</div>
         <div style={s.bar}>
           <input
             style={s.input}
