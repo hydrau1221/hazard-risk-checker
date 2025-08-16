@@ -37,22 +37,45 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   return null;
 }
 
-/** 🔒 Lis UNIQUEMENT les champs LANDSLIDE : ...LNDS_RISKR (catégorie) et ...LNDS_RISKS (score) */
+/** 🔒 Lecture stricte des champs LANDSLIDE :
+ *  - Catégorie officielle: ...LNDS_RISKR  (texte "Relatively ...")
+ *  - Score Landslide:      ...LNDS_RISKS  (0–100)  (PAS le Risk Index global)
+ */
 function extract(attrs: Record<string, any>) {
-  // Landslide rating (texte) — PRIORITAIRE
+  // --- label (obligatoire pour la classe officielle)
   const riskR = findAttr(attrs, [
-    /(^|_)LNDS.*_RISKR$/i,                  // ex. NRI_CensusTracts_LNDS_RISKR
-  ]);
-  // Landslide score (info) — 0–100
-  const riskS = findAttr(attrs, [
-    /(^|_)LNDS.*_RISKS$/i,                  // ex. NRI_CensusTracts_LNDS_RISKS
+    /(^|_)LNDS_RISKR$/i,              // match exact "LNDS_RISKR" (avec éventuel préfixe)
+    /(^|_)LNDS.*_RISKR$/i,            // sinon, n'importe quel "...LNDS..._RISKR"
   ]);
 
+  // --- score landslide (très strict) : on NE prend que "...LNDS_RISKS"
+  let riskS = findAttr(attrs, [
+    /(^|_)LNDS_RISKS$/i,              // exact "LNDS_RISKS" (avec éventuel préfixe)
+  ]);
+
+  // Si pas trouvé (certains services préfixent différemment), on cherche un fallback
+  // mais en restant PRUDENT : LNDS + RISK + S à la fin, sans RANK/PCTL/INDEX/RISKR.
+  if (!riskS) {
+    const keys = Object.keys(attrs);
+    const cand = keys.find(k => {
+      const up = k.toUpperCase();
+      return up.includes("LNDS")
+        && up.endsWith("RISKS")
+        && !up.includes("RISKR")   // pas le rating
+        && !up.includes("RANK")
+        && !up.includes("PCTL")
+        && !up.includes("INDEX");
+    });
+    if (cand) riskS = { key: cand, value: attrs[cand] };
+  }
+
+  // Convertit le score en 0–100 si besoin (certaines sources renvoient 0–1)
+  let score: number | null = null;
+  if (riskS && typeof riskS.value === "number" && Number.isFinite(riskS.value)) {
+    score = riskS.value <= 1.5 ? riskS.value * 100 : riskS.value;
+  }
+
   const level = mapLabelToFive(riskR?.value);
-  const score =
-    typeof riskS?.value === "number" && Number.isFinite(riskS.value)
-      ? (riskS!.value <= 1.5 ? riskS!.value * 100 : riskS!.value) // normalise 0–1 → 0–100 si besoin
-      : null;
 
   return {
     level,
