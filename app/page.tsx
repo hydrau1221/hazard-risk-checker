@@ -7,7 +7,7 @@ type RiskLevel =
   | "Very Low" | "Low" | "Moderate" | "High" | "Very High"
   | "Undetermined" | "Not Applicable";
 
-const LAYER_ID = 28; // FEMA NFHL - Flood Hazard Zones
+const LAYER_ID = 28;
 
 // Palette unique (inclut Not Applicable)
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
@@ -167,7 +167,7 @@ export default function Home() {
         fetch(`/api/tornado/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
-      // Flood (texte SANS le prefixe du niveau)
+      // Flood
       if (femaRes.status === "fulfilled") {
         const r = femaRes.value; const j = await r.json();
         if (r.ok) {
@@ -179,7 +179,7 @@ export default function Home() {
         } else { setFloodLevel(null); setFloodText(j?.error || "FEMA query failed."); }
       } else { setFloodLevel(null); setFloodText("FEMA fetch failed."); }
 
-      // Earthquake (texte SANS le prefixe du niveau)
+      // Earthquake
       if (eqRes.status === "fulfilled") {
         const r = eqRes.value; const j = await r.json();
         if (r.ok) {
@@ -188,26 +188,19 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-// -------- Helper NRI --------
-const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
-  // rien dans le bloc blanc pour NA/Undetermined
-  if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
+      // -------- Helper NRI --------
+      const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
+        if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
+        const word = `${String(lvl).toLowerCase()} risk`;
+        const levelWord = word.charAt(0).toUpperCase() + word.slice(1); // "Low risk"
+        const parts: string[] = [`${levelWord} susceptibility`];
+        const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
+        if (s !== null) parts.push(`score ${s}`);
+        if (tractId) parts.push(`tract ${tractId}`);
+        return parts.join(" — ");
+      };
 
-  // "Low risk" avec majuscule initiale, et pas de tiret avant "susceptibility"
-  const word = `${String(lvl).toLowerCase()} risk`;
-  const levelWord = word.charAt(0).toUpperCase() + word.slice(1); // "Low risk"
-
-  const parts: string[] = [`${levelWord} susceptibility`];
-
-  const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
-  if (s !== null) parts.push(`score ${s}`);
-  if (tractId) parts.push(`tract ${tractId}`);
-
-  return parts.join(" — ");
-};
-
-
-      // Landslide (NRI)
+      // Landslide
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
         if (r.ok) {
@@ -217,7 +210,7 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
         } else { setLsLevel(null); setLsText(j?.error || "NRI landslide query failed."); }
       } else { setLsLevel(null); setLsText("NRI landslide fetch failed."); }
 
-      // Wildfire (NRI)
+      // Wildfire
       if (wfRes.status === "fulfilled") {
         const r = wfRes.value; const j = await safeJson(r);
         if (r.ok && !j?.__nonjson) {
@@ -227,7 +220,7 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
         } else { setWfLevel(null); setWfText("NRI wildfire query failed."); }
       } else { setWfLevel(null); setWfText("NRI wildfire fetch failed."); }
 
-      // Heatwave (NRI)
+      // Heatwave
       if (heatRes.status === "fulfilled") {
         const r = heatRes.value; const j = await r.json();
         if (r.ok) {
@@ -237,7 +230,7 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
         } else { setHeatLevel(null); setHeatText(j?.error || "NRI heatwave query failed."); }
       } else { setHeatLevel(null); setHeatText("NRI heatwave fetch failed."); }
 
-      // Cold Wave (NRI)
+      // Cold Wave
       if (coldRes.status === "fulfilled") {
         const r = coldRes.value; const j = await r.json();
         if (r.ok) {
@@ -247,7 +240,7 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
         } else { setColdLevel(null); setColdText(j?.error || "NRI cold wave query failed."); }
       } else { setColdLevel(null); setColdText("NRI cold wave fetch failed."); }
 
-      // Hurricane (selon ta route)
+      // Hurricane
       if (hurrRes.status === "fulfilled") {
         const r = hurrRes.value; const j = await r.json();
         if (r.ok) {
@@ -257,7 +250,7 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
         } else { setHurrLevel(null); setHurrText(j?.error || "Hurricane query failed."); }
       } else { setHurrLevel(null); setHurrText("Hurricane fetch failed."); }
 
-      // Tornado (NRI)
+      // Tornado
       if (torRes.status === "fulfilled") {
         const r = torRes.value; const j = await r.json();
         if (r.ok) {
@@ -274,24 +267,58 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
     }
   }
 
-  // ---------- styles ----------
-  const header   = { background: "#121212", color: "#e0e0e0", padding: "28px 16px", textAlign: "center" as const };
-  const title    = { fontSize: 32, margin: 0, color: "#e0e0e0" };
-  const subtitle = { opacity: 0.9, marginTop: 6, fontStyle: "italic" as const, color: "#e0e0e0" };
-  const tagline  = { opacity: 0.9, marginTop: 8, color: "#e0e0e0" };
-  const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 16, flexWrap: "wrap" as const, alignItems: "center" };
-  const input    = { width: 520, maxWidth: "92vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" };
-  const btn      = { padding: "10px 16px", borderRadius: 6, border: "1px solid #2d2d2d", background: "#2d2d2d", color: "#e0e0e0", cursor: "pointer" } as any;
-  const hint     = { fontSize: 12, color: "#e0e0e0", opacity: 0.8, marginTop: 6 };
+  // ---------- styles (branding) ----------
+  const header = {
+    background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+    color: "#e5e7eb",
+    padding: "36px 16px 28px",
+    textAlign: "center" as const,
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+  };
+  const title = { fontSize: 34, lineHeight: 1.15, margin: 0, letterSpacing: 0.2 } as const;
+  const beta  = {
+    display: "inline-block",
+    marginLeft: 10,
+    padding: "2px 8px",
+    fontSize: 12,
+    borderRadius: 999,
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    verticalAlign: "middle" as const,
+  };
+  const subtitle = { opacity: 0.9, marginTop: 6, fontStyle: "italic" as const, color: "#cbd5e1" };
+  const tagline  = { opacity: 0.9, marginTop: 10, color: "#e5e7eb" };
+  const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 18, flexWrap: "wrap" as const, alignItems: "center" };
+  const input    = {
+    width: 560, maxWidth: "92vw", padding: "12px 14px 12px 40px",
+    borderRadius: 10, border: "1px solid #475569", background: "rgba(17,24,39,0.35)", color: "#e5e7eb",
+    outline: "none",
+    backgroundImage:
+      `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23cbd5e1" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"/></svg>')`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "12px center",
+    transition: "border-color .15s ease, box-shadow .15s ease",
+  } as const;
+  const btn = {
+    padding: "12px 18px", borderRadius: 10, border: "1px solid #1f2937",
+    background: "#1f2937", color: "#e5e7eb", cursor: "pointer",
+    fontWeight: 600, transition: "transform .08s ease",
+  } as const;
+  const hint     = { fontSize: 12, color: "#cbd5e1", opacity: 0.85, marginTop: 8 };
 
-  const gridWrap = { background: "#e0e0e0", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
-  const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 1100, margin: "20px auto" };
-  const card     = { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
-const sectionHeader = { padding: 16, borderBottom: "1px solid #e2e8f0", color: "#111827" };
-const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
-  const cardBody = { padding: 24 };
+  const gridWrap = { background: "#f3f4f6", minHeight: "calc(100vh - 140px)", padding: "28px 16px" };
+  const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 22, maxWidth: 1100, margin: "24px auto" };
+  const card     = {
+    background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: 0,
+    textAlign: "center" as const, boxShadow: "0 6px 16px rgba(0,0,0,0.04)", overflow: "hidden",
+    transition: "transform .12s ease, box-shadow .12s ease",
+  };
+  const sectionHeader = { padding: 16, borderBottom: "1px solid #e5e7eb", color: "#0f172a" };
+  const h2            = { margin: "0 0 10px 0", fontSize: 20, color: "#0f172a", letterSpacing: 0.2 };
+  const cardBody = { padding: 22 };
   const small    = { fontSize: 14, color: "#334155" };
-  const foot     = { fontSize: 12, opacity: 0.7, textAlign: "center" as const, marginTop: 8, color: "#374151" };
+  const footWrap = { maxWidth: 1100, margin: "8px auto 0", textAlign: "center" as const };
+  const foot     = { fontSize: 12, opacity: 0.75, color: "#374151" };
 
   const coloredHeader = (lvl: RiskLevel) => ({
     background: PALETTE[lvl].bg,
@@ -305,17 +332,18 @@ const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
     borderRadius: 999,
     background: PALETTE[lvl].badge,
     color: "white",
-    fontWeight: 700,
+    fontWeight: 800 as const,
+    letterSpacing: 0.3,
   });
 
   const cardShell = (title: string, text: string) => (
-    <section style={card}>
+    <section className="card" style={card}>
       <div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>{title}</h2></div>
       <div style={cardBody}><div style={small} aria-live="polite">{text}</div></div>
     </section>
   );
   const levelCard = (title: string, lvl: RiskLevel, text: string) => (
-    <section style={{ ...card, border: `1px solid ${PALETTE[lvl].border}` }}>
+    <section className="card" style={{ ...card, border: `1px solid ${PALETTE[lvl].border}` }}>
       <div style={coloredHeader(lvl)}>
         <h2 style={{ ...h2, margin: 0 }}>{title}</h2>
         <div style={{ marginTop: 6 }}>
@@ -343,8 +371,11 @@ const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
   return (
     <div>
       <header style={header}>
-        <h1 style={title}>Risk Map Check</h1>
-        <div style={subtitle}>By Hydrau</div>
+        <h1 style={title}>
+          Risk Map Check
+          <span style={beta}>BETA</span>
+        </h1>
+        <div style={subtitle}>by Hydrau</div>
         <div style={tagline}>Enter your address to check your risk exposure</div>
         <div style={bar}>
           <input
@@ -353,8 +384,9 @@ const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
             onChange={(e) => setAddress(e.target.value)}
             placeholder="123 Main St, City, ST 12345 — or paste lat,lon"
             onKeyDown={(e) => { if (e.key === "Enter" && loading === "idle") onCheck(); }}
+            aria-label="Address input"
           />
-          <button style={btn} onClick={onCheck} disabled={loading !== "idle"}>
+          <button className="cta" style={btn} onClick={onCheck} disabled={loading !== "idle"} aria-label="Check risks">
             {loading === "idle" ? "Check" : loading === "geocode" ? "Geocoding…" : "Checking…"}
           </button>
         </div>
@@ -363,12 +395,12 @@ const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
 
       <main style={gridWrap}>
         {error && (
-          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 6 }}>
+          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 12, borderRadius: 10 }}>
             {error}
           </div>
         )}
         {geoNote && (
-          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fef3c7", border: "1px solid #fde68a", color: "#78350f", padding: 10, borderRadius: 6 }}>
+          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fef3c7", border: "1px solid #fde68a", color: "#78350f", padding: 12, borderRadius: 10 }}>
             {geoNote}
           </div>
         )}
@@ -384,10 +416,26 @@ const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
           {torCard}
         </div>
 
-        <div style={foot}>
-          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Wildfire, Heatwave, Cold Wave, Tornado).
+        <div style={footWrap}>
+          <div style={foot}>
+            ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Wildfire, Heatwave, Cold Wave, Tornado).
+          </div>
+          <div style={{ ...foot, marginTop: 8 }}>
+            © {new Date().getFullYear()} Hydrau — Educational project • Privacy-friendly, no tracking.
+          </div>
         </div>
       </main>
+
+      {/* micro-interactions (hover/focus) */}
+      <style jsx>{`
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.08); }
+        .cta:hover:not([disabled]) { transform: translateY(-1px); }
+        .cta:active:not([disabled]) { transform: translateY(0); }
+        input:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.35); border-color: #60a5fa !important; }
+        @media (max-width: 420px) {
+          h1 { font-size: 26px !important; }
+        }
+      `}</style>
     </div>
   );
 }
