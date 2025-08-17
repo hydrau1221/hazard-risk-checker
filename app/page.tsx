@@ -35,6 +35,7 @@ function classifyFlood(features: Feature[] | null): {
     a.SFHA_TF === true || a.SFHA_TF === "T" || a.SFHA_TF === "Y" ||
     ["A","AE","AO","AH","A1","A2","A3","A99","VE","V","V1"].some(p => zone.startsWith(p));
 
+  // Détections utiles
   const isFloodway = subty.includes("FLOODWAY");
   const isShadedX =
     zone === "X" &&
@@ -59,7 +60,6 @@ function classifyFlood(features: Feature[] | null): {
 
 export default function Home() {
   const [address, setAddress] = useState("1600 Pennsylvania Ave NW, Washington, DC");
-  const [debug, setDebug] = useState(false);
   const [loading, setLoading] = useState<"idle" | "geocode" | "fetch">("idle");
 
   // Flood
@@ -68,17 +68,17 @@ export default function Home() {
 
   // Earthquake
   const [eqLevel, setEqLevel] = useState<RiskLevel | null>(null);
-  const [eqText, setEqText] = useState<string>("Coming soon");
+  const [eqText, setEqText] = useState<string>("Enter your address and press Check.");
 
   // Landslide
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
-  const [lsText, setLsText] = useState<string>("Coming soon");
+  const [lsText, setLsText] = useState<string>("Enter your address and press Check.");
 
-  // Placeholders pour les nouveaux risques (interface seulement)
-  const [hurrText] = useState<string>("Coming soon");
-  const [heatText] = useState<string>("Coming soon");
-  const [coldText] = useState<string>("Coming soon");
-  const [torText]  = useState<string>("Coming soon");
+  // Placeholders (interface seulement)
+  const [hurrText] = useState<string>("Enter your address and press Check.");
+  const [heatText] = useState<string>("Enter your address and press Check.");
+  const [coldText] = useState<string>("Enter your address and press Check.");
+  const [torText]  = useState<string>("Enter your address and press Check.");
 
   const [error, setError] = useState<string | null>(null);
 
@@ -107,7 +107,7 @@ export default function Home() {
         lat = ll.lat; lon = ll.lon;
       } else {
         // géocoder
-        const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}${debug ? "&debug=1":""}`, { cache: "no-store" });
+        const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
         const gj = await g.json();
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
         lat = gj.lat; lon = gj.lon;
@@ -118,7 +118,7 @@ export default function Home() {
       setEqText("Querying USGS (Design Maps)…");
       setLsText("Querying NRI Landslide…");
 
-      const dbg = debug ? "&debug=1" : "";
+      const dbg = ""; // debug désactivé côté UI
 
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes] = await Promise.allSettled([
@@ -148,7 +148,7 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Landslide
+      // Landslide (NRI)
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
 
@@ -265,10 +265,6 @@ export default function Home() {
           <button style={btn} onClick={onCheck} disabled={loading !== "idle"}>
             {loading === "idle" ? "Check" : loading === "geocode" ? "Geocoding…" : "Checking…"}
           </button>
-          <label style={{ display:"flex", alignItems:"center", gap:6, color:"#fff" }}>
-            <input type="checkbox" checked={debug} onChange={(e)=>setDebug(e.target.checked)} />
-            Debug
-          </label>
         </div>
       </header>
 
@@ -278,15 +274,13 @@ export default function Home() {
           {floodCard}
           {eqCard}
           {lsCard}
-          {placeholderCard("Wildfire", "Coming soon")}
+          {placeholderCard("Wildfire", "Enter your address and press Check.")}
           {placeholderCard("Hurricane", hurrText)}
           {placeholderCard("Heatwave", heatText)}
           {placeholderCard("Cold Wave", coldText)}
           {placeholderCard("Tornado", torText)}
         </div>
-        <div style={foot}>
-          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide).
-        </div>
+        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide).</div>
       </main>
     </div>
   );
