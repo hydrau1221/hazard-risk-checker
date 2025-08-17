@@ -194,7 +194,7 @@ export default function Home() {
       const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
         if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
         const levelWord = `${String(lvl).toLowerCase()} risk`;
-        const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
+        const levelWord = word.charAt(0).toUpperCase() + word.slice(1);
         const parts: string[] = [`${levelWord} susceptibility`];
         if (s !== null) parts.push(`score ${s}`);
         if (tractId) parts.push(`tract ${tractId}`);
