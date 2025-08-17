@@ -1,3 +1,4 @@
+// app/api/geocode/route.ts
 import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -6,9 +7,14 @@ function ok(lat: number, lon: number, meta: Record<string, any> = {}) {
   return Response.json({ lat, lon, ...meta }, { headers: { "cache-control": "no-store" } });
 }
 
+const NOMINATIM_UA =
+  process.env.NOMINATIM_UA ||
+  "HydrauRiskChecker/1.0 (admin@example.com)"; // ⚠️ mets ton email ou domaine ici
+
 type Parsed = { street: string; city?: string; state?: string; zip?: string };
 
 function parseUS(addr: string): Parsed | null {
+  // "195 Center St, Marysvale, UT 84750" ou sans ZIP
   const rx = /^\s*(.+?)\s*,\s*([A-Za-z .'-]+?)\s*,\s*([A-Z]{2})(?:\s+(\d{5})(?:-\d{4})?)?\s*$/;
   const m = addr.match(rx);
   if (m) return { street: m[1].trim(), city: m[2].trim(), state: m[3], zip: m[4] };
@@ -18,6 +24,7 @@ function parseUS(addr: string): Parsed | null {
   return null;
 }
 
+// ---------- Census: structured (ton implémentation d'origine)
 async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
   const params = new URLSearchParams({
     street: p.street,
@@ -38,38 +45,48 @@ async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
     const lat = Number(m?.coordinates?.y);
     const lon = Number(m?.coordinates?.x);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return ok(lat, lon, { matched: m?.matchedAddress ?? null, source: "census", benchmark, mode: "structured", precision: "rooftop" });
+      return ok(lat, lon, { matched: m?.matchedAddress ?? null, source: "census", benchmark, mode: "structured" });
     }
   }
   return null;
 }
 
+// ---------- ✅ Nouveau: Census one-line fallback
+async function censusOneLine(address: string, benchmark: string, attempts: any[]) {
+  const params = new URLSearchParams({
+    address,
+    format: "json",
+    benchmark,
+  });
+  const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?${params.toString()}`;
+  const r = await fetch(url, { cache: "no-store" });
+  let j: any = null;
+  try { j = await r.json(); } catch {}
+  const matches = j?.result?.addressMatches ?? [];
+  attempts.push({ engine: "census-oneline", benchmark, url, status: r.status, count: matches.length });
+  if (r.ok && matches.length > 0) {
+    const m = matches[0];
+    const lat = Number(m?.coordinates?.y);
+    const lon = Number(m?.coordinates?.x);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return ok(lat, lon, { matched: m?.matchedAddress ?? null, source: "census", benchmark, mode: "oneline" });
+    }
+  }
+  return null;
+}
+
+// ---------- OSM (Nominatim) fallback
 async function osm(addr: string, attempts: any[]) {
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(addr)}`;
-  const r = await fetch(url, {
-    cache: "no-store",
-    headers: {
-      "User-Agent": "HydrauRiskChecker/1.0 (contact@example.com)",
-      "Accept-Language": "en-US",
-      "Referer": "https://your-vercel-domain.vercel.app/"
-    }
-  });
-  const arr: any[] = await r.json();
-  attempts.push({ engine: "nominatim", url, status: r.status, count: arr?.length ?? 0 });
+  const r = await fetch(url, { cache: "no-store", headers: { "User-Agent": NOMINATIM_UA } });
+  let arr: any[] = [];
+  try { arr = await r.json(); } catch {}
+  attempts.push({ engine: "nominatim", url, status: r.status, count: Array.isArray(arr) ? arr.length : 0 });
   if (r.ok && Array.isArray(arr) && arr.length > 0) {
     const it = arr[0];
     const lat = Number(it.lat), lon = Number(it.lon);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      const precision =
-        it.class === "building" ? "rooftop" :
-        it.class === "highway" ? "street"  :
-        (it.type === "city" || it.type === "administrative") ? "city" :
-        it.type || it.class || "unknown";
-      return ok(lat, lon, {
-        display_name: it.display_name ?? null,
-        source: "nominatim",
-        precision
-      });
+      return ok(lat, lon, { display_name: it.display_name ?? null, source: "nominatim" });
     }
   }
   return null;
@@ -84,6 +101,7 @@ export async function GET(req: NextRequest) {
   const attempts: any[] = [];
   const parsed = parseUS(address);
 
+  // 1) Census structured (2020 puis Current), avec et sans ZIP si présent
   if (parsed) {
     for (const bench of ["Public_AR_Census2020", "Public_AR_Current"]) {
       const res1 = await censusStructured(parsed, bench, attempts);
@@ -104,7 +122,17 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Fallback OSM
+  // 2) ✅ Nouveau fallback: Census "onelineaddress" (mêmes benchmarks)
+  for (const bench of ["Public_AR_Census2020", "Public_AR_Current"]) {
+    const res3 = await censusOneLine(address, bench, attempts);
+    if (res3) {
+      const j3 = await res3.json();
+      if (debug) j3.attempts = attempts;
+      return Response.json(j3);
+    }
+  }
+
+  // 3) OSM / Nominatim
   const resO = await osm(address, attempts);
   if (resO) {
     const j = await resO.json();
