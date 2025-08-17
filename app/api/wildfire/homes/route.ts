@@ -1,117 +1,197 @@
-// app/api/wildfire/homes/route.ts
+// app/api/wildfire/homes-county/route.ts
 import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * SERVICE ImageServer "Risk to Homes" (cRPS).
- * Idéalement, fournis l’URL officielle via la variable d’env WFR_HOMES_URL.
- * Sinon on essaie une petite liste de candidats.
+ * ➤ County FeatureServer (Wildfire Risk to Communities).
+ * Doit pointer vers une couche polygonale "counties" qui contient un libellé
+ * Risk-to-Homes (Low/Moderate/High/Very High) et/ou un score (RPS/cRPS/percentile).
+ * Renseigne ceci dans Vercel: WFR_COUNTY_URL = https://.../FeatureServer/0
  */
-const CANDIDATES = [
-  process.env.WFR_HOMES_URL || "",
-  // <= Mets ici l’URL exacte si tu la connais.
-  // Quelques candidats courants (si l’un marche, l’API fonctionne) :
-  "https://wildfirerisk.org/arcgis/rest/services/Risk_to_Homes/ImageServer",
-  "https://wildfirerisk.wim.usgs.gov/arcgis/rest/services/Risk_to_Homes/ImageServer",
-  "https://services3.arcgis.com/T4QMspbfLg3qTGWY/ArcGIS/rest/services/Risk_to_Homes/ImageServer",
-].filter(Boolean);
+const WFR_COUNTY = (process.env.WFR_COUNTY_URL || "").replace(/\/+$/, "");
 
-type Level = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined" | "Not Applicable";
+type Level =
+  | "Very Low" | "Low" | "Moderate" | "High" | "Very High"
+  | "Undetermined" | "Not Applicable";
 
-/** Convertit un score numérique → nos 5 niveaux */
-function levelFromNumber(v: number): Level {
-  // Cas 0–1
-  if (v >= 0 && v <= 1.00001) {
+/* --------- utils communs --------- */
+
+function okJson(body: any, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+    },
+  });
+}
+
+function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
+  for (const k of Object.keys(attrs)) {
+    const up = k.toUpperCase();
+    if (patterns.some(rx => rx.test(up))) return { key: k, value: attrs[k] };
+  }
+  return null;
+}
+
+function mapLabelToLevel(raw: unknown): Level {
+  if (raw == null) return "Undetermined";
+  const s = String(raw).toLowerCase();
+  if (s.includes("not applicable") || s.includes("no housing") || s.includes("no homes")) return "Not Applicable";
+  if (s.includes("very high")) return "Very High";
+  if (s.includes("high")) return "High";
+  if (s.includes("moderate")) return "Moderate";
+  if (s.includes("low")) return "Low";
+  if (s.includes("very low")) return "Very Low";
+  return "Undetermined";
+}
+
+/** Mappe un score (0–1 ou 0–100 ou classes 1..5) → niveaux */
+function mapScoreToLevel(vRaw: unknown): Level {
+  if (vRaw == null) return "Undetermined";
+  let v = typeof vRaw === "number" ? vRaw : Number(vRaw);
+  if (!Number.isFinite(v)) return "Undetermined";
+
+  if (v >= 0 && v <= 1.00001) {           // 0–1
     if (v <= 0.2) return "Very Low";
     if (v <= 0.4) return "Low";
     if (v <= 0.6) return "Moderate";
     if (v <= 0.8) return "High";
     return "Very High";
   }
-  // Cas 0–100
-  if (v >= 0 && v <= 100.00001) {
+  if (v >= 0 && v <= 100.00001) {         // 0–100 (percentile/score)
     if (v <= 20) return "Very Low";
     if (v <= 40) return "Low";
     if (v <= 60) return "Moderate";
     if (v <= 80) return "High";
     return "Very High";
   }
-  // Cas classes 1..5 (ou 0..4)
-  const vi = Math.round(v);
-  if (vi === 0 || vi === 1) return "Very Low";
-  if (vi === 2) return "Low";
-  if (vi === 3) return "Moderate";
-  if (vi === 4) return "High";
-  if (vi >= 5) return "Very High";
+  // Classes entières
+  const i = Math.round(v);
+  if (i <= 1) return "Very Low";
+  if (i === 2) return "Low";
+  if (i === 3) return "Moderate";
+  if (i === 4) return "High";
+  if (i >= 5) return "Very High";
   return "Undetermined";
 }
 
-function isNoData(x: any) {
-  return x == null || Number.isNaN(Number(x)) || x === -9999;
+function tinyEnvelope(lon: number, lat: number, meters = 50) {
+  const dLat = meters / 111_320;
+  const dLon = meters / (111_320 * Math.cos((lat * Math.PI) / 180) || 1);
+  return { xmin: lon - dLon, ymin: lat - dLat, xmax: lon + dLon, ymax: lat + dLat };
 }
 
-/** Identify au pixel */
-async function identify(url: string, lon: number, lat: number) {
+/* --------- requêtes FeatureServer --------- */
+
+async function queryFeature(url0: string, p: Record<string, string>) {
   const params = new URLSearchParams({
     f: "json",
-    geometry: JSON.stringify({ x: lon, y: lat }),
-    geometryType: "esriGeometryPoint",
-    sr: "4326",
+    outFields: "*",
     returnGeometry: "false",
-    returnCatalogItems: "false",
-    returnPixelValues: "true",
+    resultRecordCount: "1",
+    ...p,
   });
-  const r = await fetch(`${url.replace(/\/+$/, "")}/identify?${params}`, { cache: "no-store" });
+  const url = `${url0}/query?${params.toString()}`;
+  const r = await fetch(url, { cache: "no-store" });
   const text = await r.text();
   let j: any = null; try { j = text ? JSON.parse(text) : null; } catch {}
   if (!r.ok) return { ok: false as const, status: r.status, url, body: text };
-  // Patterns usuels: j.value, j.pixel, j.catalogItems, j.properties, etc.
-  const val =
-    (j && typeof j.value === "number") ? j.value :
-    (j && j.pixel && typeof j.pixel.value === "number") ? j.pixel.value :
-    (j && typeof j.pixelValue === "number") ? j.pixelValue :
-    null;
-
-  return { ok: true as const, url, raw: j, value: val };
+  const feat = j?.features?.[0];
+  return { ok: true as const, url, attrs: feat?.attributes ?? null };
 }
 
-/** Essaye plusieurs services jusqu’à réponse valable */
-async function identifyFirst(lon: number, lat: number, debug: boolean) {
-  const attempts: any[] = [];
-  for (const base of CANDIDATES) {
-    try {
-      const res = await identify(base, lon, lat);
-      attempts.push({ url: res.url, ok: res.ok, status: (res as any).status, hasValue: !isNoData(res.value) });
-      if (res.ok) return { pick: res, attempts };
-    } catch (e: any) {
-      attempts.push({ url: base, error: String(e?.message || e) });
-    }
+async function pickCounty(url0: string, lon: number, lat: number) {
+  const attempts: Array<{ step: string; url: string }> = [];
+
+  const pWithin = await queryFeature(url0, {
+    geometry: JSON.stringify({ x: lon, y: lat }),
+    geometryType: "esriGeometryPoint",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelWithin",
+  });
+  attempts.push({ step: "point:within", url: (pWithin as any).url });
+  if (pWithin.ok && pWithin.attrs) return { pick: pWithin, attempts };
+
+  for (const d of [3, 10, 30]) {
+    const pInter = await queryFeature(url0, {
+      geometry: JSON.stringify({ x: lon, y: lat }),
+      geometryType: "esriGeometryPoint",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      distance: String(d),
+      units: "esriSRUnit_Meter",
+    });
+    attempts.push({ step: `point:intersects:${d}m`, url: (pInter as any).url });
+    if (pInter.ok && pInter.attrs) return { pick: pInter, attempts };
   }
+
+  const env = tinyEnvelope(lon, lat, 60);
+  const eInter = await queryFeature(url0, {
+    geometry: JSON.stringify({
+      xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax, spatialReference: { wkid: 4326 },
+    }),
+    geometryType: "esriGeometryEnvelope",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+  });
+  attempts.push({ step: "envelope:intersects:60m", url: (eInter as any).url });
+  if (eInter.ok && eInter.attrs) return { pick: eInter, attempts };
+
   return { pick: null as any, attempts };
 }
 
-/** Petit offset géodésique (mètres → degrés) */
-function dlat(m: number) { return m / 111_320; }
-function dlon(m: number, lat: number) { return m / (111_320 * Math.cos((lat * Math.PI) / 180) || 1); }
+/** Extraction souple des champs "Risk to Homes" (labels & scores) */
+function extractRTH(attrs: Record<string, any>) {
+  // Label texte
+  const label = findAttr(attrs, [
+    /(RISK|RTH|RPS).*TO.*HOMES.*(LABEL|CLASS|CAT|RATING)$/i,
+    /(RISK|RTH|RPS).*HOMES.*(LABEL|CLASS|CAT|RATING)$/i,
+    /(RISK.*HOMES|RISKTOHOMES|RISK_TO_HOMES)$/i,
+    /(RPS|CRPS).*CLASS$/i,
+  ]);
 
-/** Fallback 3×3 (0 m + ±30 m) pour éviter les trous aux limites de pixel */
-async function identify3x3(lon: number, lat: number, debug: boolean) {
-  const offsets = [
-    [0, 0], [30, 0], [-30, 0], [0, 30], [0, -30], [30, 30], [30, -30], [-30, 30], [-30, -30],
-  ];
-  const tries: any[] = [];
-  for (const [mx, my] of offsets) {
-    const res = await identifyFirst(lon + dlon(mx, lat), lat + dlat(my), debug);
-    tries.push(...res.attempts);
-    if (res.pick && !isNoData(res.pick.value)) return { pick: res.pick, attempts: tries };
+  // Score/percentile
+  const score = findAttr(attrs, [
+    /(RPS|CRPS)(_?(SCORE|MEAN|VALUE))$/i,
+    /(RPS|CRPS).*PCTL$/i,
+    /(RISK.*HOMES).*SCORE$/i,
+  ]);
+
+  // Métadonnées standards
+  const county = attrs.COUNTY ?? attrs.COUNTY_NAME ?? attrs.NAME ?? null;
+  const state  = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? attrs.STUSPS ?? null;
+
+  // Mapping final
+  let level: Level = "Undetermined";
+  if (label) level = mapLabelToLevel(label.value);
+  if (level === "Undetermined" && score) level = mapScoreToLevel(score.value);
+
+  // Not Applicable cas explicites
+  const txt = (label?.value ?? "").toString().toLowerCase();
+  if (txt.includes("not applicable") || txt.includes("no housing") || txt.includes("no homes")) {
+    level = "Not Applicable";
   }
-  // aucun pixel valable
-  return { pick: null as any, attempts: tries };
+
+  let numeric: number | null = null;
+  if (score && typeof score.value === "number" && Number.isFinite(score.value)) {
+    numeric = score.value;
+  }
+
+  return {
+    level,
+    label: label?.value == null ? null : String(label.value),
+    score: numeric,
+    county,
+    state,
+    usedFields: { labelField: label?.key ?? null, scoreField: score?.key ?? null },
+  };
 }
 
-/** Géocode interne via /api/geocode (permet ?address=) */
+/* --------- géocode interne (adresse → lat/lon) --------- */
 async function geocodeFromAddress(req: NextRequest, address: string) {
   const origin = new URL(req.url).origin;
   const url = `${origin}/api/geocode?address=${encodeURIComponent(address)}`;
@@ -124,12 +204,18 @@ async function geocodeFromAddress(req: NextRequest, address: string) {
   return { lat: j.lat as number, lon: j.lon as number, geocode: j };
 }
 
+/* --------- handler --------- */
 export async function GET(req: NextRequest) {
   const u = new URL(req.url);
   const debug = u.searchParams.get("debug") === "1";
-  const address = u.searchParams.get("address");
+
+  if (!WFR_COUNTY) {
+    return okJson({ error: "WFR_COUNTY_URL env var required (FeatureServer/0 for counties)" }, 500);
+  }
+
   let lat = u.searchParams.get("lat");
   let lon = u.searchParams.get("lon");
+  const address = u.searchParams.get("address");
 
   let latNum: number, lonNum: number;
   let geocodeInfo: any = null;
@@ -143,43 +229,45 @@ export async function GET(req: NextRequest) {
       lonNum = Number(lon);
     }
   } catch (e: any) {
-    return Response.json({ error: e?.message || "geocode error" }, { status: 400 });
+    return okJson({ error: e?.message || "geocode error" }, 400);
   }
 
   if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
-    return Response.json({ error: "Missing lat/lon" }, { status: 400 });
+    return okJson({ error: "Missing lat/lon" }, 400);
   }
 
-  // Identify + fallback 3×3
-  const out = await identify3x3(lonNum, latNum, debug);
+  const steps: any[] = [];
+  const picked = await pickCounty(WFR_COUNTY, lonNum, latNum);
+  steps.push({ unit: "county", attempts: picked.attempts });
 
-  if (out.pick && !isNoData(out.pick.value)) {
-    const v = Number(out.pick.value);
-    const level = levelFromNumber(v);
+  if (picked.pick && picked.pick.ok && picked.pick.attrs) {
+    const attrs = picked.pick.attrs as Record<string, any>;
+    const ext = extractRTH(attrs);
+
     const body: any = {
-      level,
-      value: v,
-      adminUnit: "pixel",
-      provider: "USFS / Wildfire Risk to Communities (Risk to Homes, cRPS)",
-      note: "Raster identify (~30 m pixel) with 3×3 fallback",
+      level: ext.level,
+      label: ext.label,
+      score: ext.score,
+      adminUnit: "county",
+      county: ext.county ?? null,
+      state: ext.state ?? null,
+      provider: "USFS / Wildfire Risk to Communities — Risk to Homes (county)",
     };
     if (debug) body.debug = {
       geocode: geocodeInfo ?? null,
-      attempts: out.attempts,
-      rawSample: out.pick.raw ? Object.keys(out.pick.raw).slice(0, 8) : [],
-      serviceUrl: out.pick.url?.replace(/\/identify.*/, "") || null,
+      steps,
+      usedFields: ext.usedFields,
+      attrKeys: Object.keys(attrs).sort(),
     };
-    return Response.json(body, { headers: { "cache-control": "no-store" } });
+    return okJson(body);
   }
 
-  // Pas de donnée au pixel => Not Applicable (zones blanches / eau / non combustible)
   const res: any = {
-    level: "Not Applicable",
-    value: null,
-    adminUnit: "pixel",
-    provider: "USFS / Wildfire Risk to Communities (Risk to Homes, cRPS)",
-    note: "No pixel value at this location (likely water / non-burnable / no structures).",
+    level: "Undetermined",
+    label: "No Rating",
+    adminUnit: "county",
+    provider: "USFS / Wildfire Risk to Communities — Risk to Homes (county)",
   };
-  if (debug) res.debug = { geocode: geocodeInfo ?? null, attempts: out.attempts };
-  return Response.json(res);
+  if (debug) res.debug = { geocode: geocodeInfo ?? null, steps };
+  return okJson(res);
 }
