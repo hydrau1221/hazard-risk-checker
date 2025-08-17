@@ -31,11 +31,10 @@ async function callUSGS(lat: number, lon: number, edition: "asce7-22" | "asce7-1
     headers: { accept: "application/json", "user-agent": UA },
     cache: "no-store",
   });
-  const bodyText = await r.text(); // garde le texte brut pour debug
+  const bodyText = await r.text();
   let body: any = null;
-  try { body = JSON.parse(bodyText); } catch { /* ignore */ }
+  try { body = JSON.parse(bodyText); } catch {}
 
-  // Le sdc peut être sous data.sdc ou response.data.sdc selon versions
   const d = body?.data ?? body?.response?.data ?? null;
   const sdc = d?.sdc ?? null;
   const sds = d?.sds ?? null;
@@ -48,7 +47,7 @@ async function callUSGS(lat: number, lon: number, edition: "asce7-22" | "asce7-1
     edition,
     siteClass,
     sdc, sds, sd1, pgam,
-    debug: { // on garde un extrait court et inoffensif
+    debug: {
       hasData: !!d,
       keys: d ? Object.keys(d).slice(0, 10) : [],
       message: body?.message || body?.error || null,
@@ -66,7 +65,6 @@ export async function GET(req: Request) {
     return new Response(JSON.stringify({ error: "lat & lon required" }), { status: 400, headers: json() });
   }
 
-  // Ordre d’essai le plus courant et le plus compatible
   const tries: Array<{edition: "asce7-22"|"asce7-16"; siteClass: string}> = [
     { edition: "asce7-22", siteClass: "D" },
     { edition: "asce7-22", siteClass: "Default" },
@@ -97,7 +95,6 @@ export async function GET(req: Request) {
     }
   }
 
-  // si aucune tentative ne renvoie sdc, on renvoie un diagnostic utile
   const diag = attempts.map(a => ({
     edition: a.edition,
     siteClass: a.siteClass,
