@@ -15,7 +15,7 @@ const DEFAULT_MODE = (process.env.WFR_MODE || "fast").toLowerCase(); // "fast" |
 
 type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined" | "Not Applicable";
 
-/** Binning 0–1020 (RPS) → 5 niveaux */
+/** RPS ~0–1020 → niveaux */
 function levelFromRps(v: number | null): Five {
   if (v == null || !Number.isFinite(v)) return "Not Applicable";
   if (v < 160) return "Very Low";
@@ -36,6 +36,13 @@ function levelFromClassCode(v: number | null): Five {
   return "Very High"; // 5+
 }
 
+/** mappe une valeur 0–255 en classe 1..5 (bucket égal) */
+function byteToClass(vByte: number): number {
+  // 0..255 -> 1..5 (5 buckets égaux). 255 => 5.
+  const cls = 1 + Math.floor((vByte * 5) / 256);
+  return Math.min(Math.max(cls, 1), 5);
+}
+
 function degPerMeterLat() { return 1 / 111_320; }
 function degPerMeterLon(latDeg: number) {
   const k = Math.cos((latDeg * Math.PI) / 180);
@@ -53,11 +60,10 @@ async function fetchWithTimeout(url: string, ms: number) {
   }
 }
 
-/** Essaie (rule, band) sur une source et renvoie la 1re valeur exploitable. */
+/** Essaie (rule, band) sur une source et renvoie la 1re valeur exploitable (class ou rps) */
 async function tryVariants(baseUrl: string, lat: number, lon: number, mode: "fast"|"deep") {
   const TIMEOUT_MS = Number(process.env.WFR_TIMEOUT_MS || (mode === "deep" ? "2000" : "1500"));
 
-  // Variantes de lecture
   const RULES = mode === "deep"
     ? [
         { label: "RPS_Class",        rule: { rasterFunction: "RPS_Class" },        bands: [undefined, 0, 1, 2, 3] },
@@ -80,7 +86,7 @@ async function tryVariants(baseUrl: string, lat: number, lon: number, mode: "fas
         sr: "4326",
         returnFirstValueOnly: "true",
         interpolation: "RSP_NearestNeighbor",
-        // 👉 pixelSize ~270m (évite une pyramide trop “molle”)
+        // pixelSize ~270m (évite une pyramide trop lissée)
         pixelSize: JSON.stringify({ x: 0.0025, y: 0.0025, spatialReference: { wkid: 4326 } }),
       });
       if (rr.rule) params.set("renderingRule", JSON.stringify(rr.rule));
@@ -107,21 +113,27 @@ async function tryVariants(baseUrl: string, lat: number, lon: number, mode: "fas
       // no-data usuels
       if (!ok || !isNum || num === 0 || num === -9999 || Math.abs(num) > 1e20) continue;
 
-      // classes 1..5 ?
+      // 1) Vraies classes 1..5 ?
       if (Math.abs(num - Math.round(num)) < 1e-6 && num >= 1 && num <= 5) {
-        return { value: num, valueType: "class" as const, variant: { rule: rr.label, band } };
+        return { value: num, valueType: "class" as const, variant: { rule: rr.label, band, raw: num } };
       }
 
-      // continu : remettre sur ~0–1020
+      // 2) ⚠️ Raster "Class" renvoyant un byte 0–255 → convertir en 1..5
+      if (/class/i.test(rr.label) && num >= 0 && num <= 255) {
+        const cls = byteToClass(num);
+        return { value: cls, valueType: "class" as const, variant: { rule: rr.label, band, raw: num } };
+      }
+
+      // 3) Continu : remettre sur ~0–1020
       let rps = num;
       if (num <= 1.5) {
-        rps = num * 1020;           // 0–1
+        rps = num * 1020;           // 0–1 → 0–1020
       } else if (num > 0 && num <= 100) {
-        rps = num * 10.2;           // ✅ 0–100 → 0–1020
+        rps = num * 10.2;           // 0–100 → 0–1020
       } else if (num > 1020 && num <= 2000) {
         rps = (num / 2000) * 1020;  // 0–2000 → 0–1020
       }
-      return { value: rps, valueType: "rps" as const, variant: { rule: rr.label, band } };
+      return { value: rps, valueType: "rps" as const, variant: { rule: rr.label, band, raw: num } };
     }
   }
   return { value: null as number | null, valueType: "unknown" as const, variant: null as any };
@@ -214,7 +226,7 @@ export async function GET(req: NextRequest) {
 
   if (debug) {
     body.debug = {
-      variant: res.variant || null, // { rule, band }
+      variant: res.variant || null, // { rule, band, raw }
       geocode: geocodeInfo || null,
     };
   }
