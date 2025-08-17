@@ -40,8 +40,7 @@ function classifyFlood(features: Feature[] | null): {
 
   const isFloodway = subty.includes("FLOODWAY");
   const isShadedX =
-    zone === "X" &&
-    (subty.includes("0.2") || subty.includes("0.2 PCT") || subty.includes("0.2%") || subty.includes("SHADED"));
+    zone === "X" && (subty.includes("0.2") || subty.includes("0.2 PCT") || subty.includes("0.2%") || subty.includes("SHADED"));
 
   let level: RiskLevel, note = "";
   if (zone.startsWith("VE") || zone.startsWith("V")) { level = "Very High"; note = "Coastal high hazard (wave action)"; }
@@ -80,19 +79,23 @@ export default function Home() {
   const [hurrLevel, setHurrLevel] = useState<RiskLevel | null>(null);
   const [hurrText, setHurrText] = useState<string>("Enter your address and press Check.");
 
-  // Heatwave (nouveau)
+  // Heatwave
   const [heatLevel, setHeatLevel] = useState<RiskLevel | null>(null);
   const [heatText, setHeatText] = useState<string>("Enter your address and press Check.");
 
   // Cold Wave
   const [coldLevel, setColdLevel] = useState<RiskLevel | null>(null);
-  const [coldText, setColdText]   = useState<string>("Enter your address and press Check.");
+  const [coldText, setColdText] = useState<string>("Enter your address and press Check.");
+
+  // Placeholders
+  const [torText]  = useState<string>("Enter your address and press Check.");
 
   const [error, setError] = useState<string | null>(null);
 
   // Note affichée quand le géocode tombe sur un centroïde de ville
   const [geoNote, setGeoNote] = useState<string | null>(null);
 
+  // Accepte "lat,lon" collés
   function parseLatLon(s: string): {lat:number, lon:number} | null {
     const m = s.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
     if (!m) return null;
@@ -102,158 +105,159 @@ export default function Home() {
     return { lat, lon };
   }
 
- async function onCheck() {
-  setError(null);
-  setGeoNote(null);
-  setLoading("geocode");
+  // ---------- action principale ----------
+  async function onCheck() {
+    setError(null);
+    setGeoNote(null);
+    setLoading("geocode");
 
-  // réinitialise les cartes
-  setFloodLevel(null); setFloodText("Geocoding address…");
-  setEqLevel(null);    setEqText("Geocoding address…");
-  setLsLevel(null);    setLsText("Geocoding address…");
-  setHurrLevel(null);  setHurrText("Geocoding address…");
-  setHeatLevel(null);  setHeatText("Geocoding address…");
-  setColdLevel(null);  setColdText("Geocoding address…");
+    // réinitialise les cartes
+    setFloodLevel(null); setFloodText("Geocoding address…");
+    setEqLevel(null);    setEqText("Geocoding address…");
+    setLsLevel(null);    setLsText("Geocoding address…");
+    setHurrLevel(null);  setHurrText("Geocoding address…");
+    setHeatLevel(null);  setHeatText("Geocoding address…");
+    setColdLevel(null);  setColdText("Geocoding address…");
 
-  try {
-    // 1) lat,lon direct ?
-    const ll = parseLatLon(address);
-    let lat: number, lon: number;
+    try {
+      // 1) lat,lon direct ?
+      const ll = parseLatLon(address);
+      let lat: number, lon: number;
 
-    if (ll) {
-      lat = ll.lat; lon = ll.lon;
-    } else {
-      // géocoder
-      const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
-      const gj = await g.json();
-      if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
-      lat = gj.lat; lon = gj.lon;
-
-      // note "city centroid" si applicable
-      const isCityCentroid = (gj && (gj.precision === "city" || gj.mode === "city"));
-      if (isCityCentroid) {
-        const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
-        setGeoNote(`Exact address not found. Using city centroid${label ? `: ${label}` : ""}. Results are generalized.`);
+      if (ll) {
+        lat = ll.lat; lon = ll.lon;
       } else {
-        setGeoNote(null);
+        // géocoder
+        const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
+        const gj = await g.json();
+        if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
+        lat = gj.lat; lon = gj.lon;
+
+        // note "city centroid" si applicable
+        const isCityCentroid = (gj && (gj.precision === "city" || gj.mode === "city"));
+        if (isCityCentroid) {
+          const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
+          setGeoNote(`Exact address not found. Using city centroid${label ? `: ${label}` : ""}. Results are generalized.`);
+        } else {
+          setGeoNote(null);
+        }
       }
-    }
 
-    // 2) requêtes parallèles
-    setLoading("fetch");
-    setFloodText("Querying FEMA NFHL…");
-    setEqText("Querying USGS (Design Maps)…");
-    setLsText("Querying NRI Landslide…");
-    setHurrText("Querying NRI Hurricane…");
-    setHeatText("Querying NRI Heatwave…");
-    setColdText("Querying NRI Cold Wave…");
+      // 2) requêtes parallèles
+      setLoading("fetch");
+      setFloodText("Querying FEMA NFHL…");
+      setEqText("Querying USGS (Design Maps)…");
+      setLsText("Querying NRI Landslide…");
+      setHurrText("Querying NRI Hurricane…");
+      setHeatText("Querying NRI Heatwave…");
+      setColdText("Querying NRI Cold Wave…");
 
-    const [femaRes, eqRes, lsRes, hurrRes, heatRes, coldRes] = await Promise.allSettled([
-      fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
-      fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-      fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-      fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-      fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-      fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-    ]);
+      const [femaRes, eqRes, lsRes, hurrRes, heatRes, coldRes] = await Promise.allSettled([
+        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
+        fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+        fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+      ]);
 
-    // Flood
-    if (femaRes.status === "fulfilled") {
-      const r = femaRes.value; const j = await r.json();
-      if (r.ok) {
-        const res = classifyFlood(j.features ?? []);
-        let line = `${res.level === "Undetermined" ? "UNDETERMINED" : `${res.level.toUpperCase()} RISK`} — Zone ${res.zone}`;
-        if (res.bfe) line += ` | BFE/Depth: ${res.bfe} ft`;
-        line += ` | ${res.note}`;
-        setFloodLevel(res.level); setFloodText(line);
-      } else { setFloodLevel("Undetermined"); setFloodText(j?.error || "FEMA query failed."); }
-    } else { setFloodLevel("Undetermined"); setFloodText("FEMA fetch failed."); }
+      // Flood
+      if (femaRes.status === "fulfilled") {
+        const r = femaRes.value; const j = await r.json();
+        if (r.ok) {
+          const res = classifyFlood(j.features ?? []);
+          let line = `${res.level === "Undetermined" ? "UNDETERMINED" : `${res.level.toUpperCase()} RISK`} — Zone ${res.zone}`;
+          if (res.bfe) line += ` | BFE/Depth: ${res.bfe} ft`;
+          line += ` | ${res.note}`;
+          setFloodLevel(res.level); setFloodText(line);
+        } else { setFloodLevel("Undetermined"); setFloodText(j?.error || "FEMA query failed."); }
+      } else { setFloodLevel("Undetermined"); setFloodText("FEMA fetch failed."); }
 
-    // Earthquake
-    if (eqRes.status === "fulfilled") {
-      const r = eqRes.value; const j = await r.json();
-      if (r.ok) {
-        setEqLevel(j.level as RiskLevel);
-        setEqText(`${(j.level as string).toUpperCase()} RISK — SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`);
-      } else { setEqLevel("Undetermined"); setEqText(j?.error || "USGS query failed."); }
-    } else { setEqLevel("Undetermined"); setEqText("USGS fetch failed."); }
+      // Earthquake
+      if (eqRes.status === "fulfilled") {
+        const r = eqRes.value; const j = await r.json();
+        if (r.ok) {
+          setEqLevel(j.level as RiskLevel);
+          setEqText(`${(j.level as string).toUpperCase()} RISK — SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`);
+        } else { setEqLevel("Undetermined"); setEqText(j?.error || "USGS query failed."); }
+      } else { setEqLevel("Undetermined"); setEqText("USGS fetch failed."); }
 
-    // Landslide
-    if (lsRes.status === "fulfilled") {
-      const r = lsRes.value; const j = await r.json();
-      if (r.ok) {
-        const lvl = (j.level as RiskLevel) ?? "Undetermined";
-        setLsLevel(lvl);
-        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                     `${String(lvl).toUpperCase()} RISK`;
-        const scorePart = s !== null ? ` — score ${s}` : "";
-        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-        setLsText(`${head} susceptibility${scorePart}${srcPart}`);
-      } else { setLsLevel("Undetermined"); setLsText(j?.error || "NRI landslide query failed."); }
-    } else { setLsLevel("Undetermined"); setLsText("NRI landslide fetch failed."); }
+      // Landslide
+      if (lsRes.status === "fulfilled") {
+        const r = lsRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setLsLevel(lvl);
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                       `${String(lvl).toUpperCase()} RISK`;
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          setLsText(`${head} susceptibility${scorePart}${srcPart}`);
+        } else { setLsLevel("Undetermined"); setLsText(j?.error || "NRI landslide query failed."); }
+      } else { setLsLevel("Undetermined"); setLsText("NRI landslide fetch failed."); }
 
-    // Hurricane (NRI)
-    if (hurrRes.status === "fulfilled") {
-      const r = hurrRes.value; const j = await r.json();
-      if (r.ok) {
-        const lvl = (j.level as RiskLevel) ?? "Undetermined";
-        setHurrLevel(lvl);
-        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                     `${String(lvl).toUpperCase()} RISK`;
-        const scorePart = s !== null ? ` — score ${s}` : "";
-        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-        setHurrText(`${head}${scorePart}${srcPart}`);
-      } else { setHurrLevel("Undetermined"); setHurrText(j?.error || "NRI hurricane query failed."); }
-    } else { setHurrLevel("Undetermined"); setHurrText("NRI hurricane fetch failed."); }
+      // Hurricane (NRI)
+      if (hurrRes.status === "fulfilled") {
+        const r = hurrRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setHurrLevel(lvl);
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                       `${String(lvl).toUpperCase()} RISK`;
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          setHurrText(`${head}${scorePart}${srcPart}`);
+        } else { setHurrLevel("Undetermined"); setHurrText(j?.error || "NRI hurricane query failed."); }
+      } else { setHurrLevel("Undetermined"); setHurrText("NRI hurricane fetch failed."); }
 
-    // Heatwave (NRI)
-    if (heatRes.status === "fulfilled") {
-      const r = heatRes.value; const j = await r.json();
-      if (r.ok) {
-        const lvl = (j.level as RiskLevel) ?? "Undetermined";
-        setHeatLevel(lvl);
-        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                     `${String(lvl).toUpperCase()} RISK`;
-        const scorePart = s !== null ? ` — score ${s}` : "";
-        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-        setHeatText(`${head}${scorePart}${srcPart}`);
-      } else { setHeatLevel("Undetermined"); setHeatText(j?.error || "NRI heatwave query failed."); }
-    } else { setHeatLevel("Undetermined"); setHeatText("NRI heatwave fetch failed."); }
+      // Heatwave (NRI)
+      if (heatRes.status === "fulfilled") {
+        const r = heatRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setHeatLevel(lvl);
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                       `${String(lvl).toUpperCase()} RISK`;
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          setHeatText(`${head}${scorePart}${srcPart}`);
+        } else { setHeatLevel("Undetermined"); setHeatText(j?.error || "NRI heatwave query failed."); }
+      } else { setHeatLevel("Undetermined"); setHeatText("NRI heatwave fetch failed."); }
 
-    // Cold Wave (NRI)  ← CE BLOC DOIT RESTER DANS onCheck()
-    if (coldRes.status === "fulfilled") {
-      const r = coldRes.value; const j = await r.json();
-      if (r.ok) {
-        const lvl = (j.level as RiskLevel) ?? "Undetermined";
-        setColdLevel(lvl);
-        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                     `${String(lvl).toUpperCase()} RISK`;
-        const scorePart = s !== null ? ` — score ${s}` : "";
-        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-        setColdText(`${head}${scorePart}${srcPart}`);
+      // Cold Wave (NRI)
+      if (coldRes.status === "fulfilled") {
+        const r = coldRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setColdLevel(lvl);
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                       `${String(lvl).toUpperCase()} RISK`;
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          setColdText(`${head}${scorePart}${srcPart}`);
+        } else {
+          setColdLevel("Undetermined");
+          setColdText(j?.error || "NRI cold wave query failed.");
+        }
       } else {
         setColdLevel("Undetermined");
-        setColdText(j?.error || "NRI cold wave query failed.");
+        setColdText("NRI cold wave fetch failed.");
       }
-    } else {
-      setColdLevel("Undetermined");
-      setColdText("NRI cold wave fetch failed.");
-    }
 
-  } catch (e: any) {
-    setError(e.message || String(e));
-  } finally {
-    setLoading("idle");
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setLoading("idle");
+    }
   }
-}
 
   // ---------- styles ----------
   const header   = { background: "#0b396b", color: "white", padding: "28px 16px", textAlign: "center" as const };
@@ -338,19 +342,19 @@ export default function Home() {
       </section>);
 
   const coldCard = coldLevel == null
-  ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Cold Wave</h2></div><div style={cardBody}><div style={small} aria-live="polite">{coldText}</div></div></section>)
-  : (<section style={{ ...card, border: `1px solid ${PALETTE[coldLevel].border}` }}>
-      <div style={coloredHeader(coldLevel)}><h2 style={{ ...h2, margin: 0 }}>Cold Wave</h2>
-        <div style={{ marginTop: 6 }}>
-          <span style={badge(coldLevel)}>
-            {coldLevel === "Undetermined" ? "UNDETERMINED"
-              : coldLevel === "Not Applicable" ? "NOT APPLICABLE"
-              : `${coldLevel.toUpperCase()} RISK`}
-          </span>
+    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Cold Wave</h2></div><div style={cardBody}><div style={small} aria-live="polite">{coldText}</div></div></section>)
+    : (<section style={{ ...card, border: `1px solid ${PALETTE[coldLevel].border}` }}>
+        <div style={coloredHeader(coldLevel)}><h2 style={{ ...h2, margin: 0 }}>Cold Wave</h2>
+          <div style={{ marginTop: 6 }}>
+            <span style={badge(coldLevel)}>
+              {coldLevel === "Undetermined" ? "UNDETERMINED"
+                : coldLevel === "Not Applicable" ? "NOT APPLICABLE"
+                : `${coldLevel.toUpperCase()} RISK`}
+            </span>
+          </div>
         </div>
-      </div>
-      <div style={cardBody}><div style={small} aria-live="polite">{coldText}</div></div>
-    </section>);
+        <div style={cardBody}><div style={small} aria-live="polite">{coldText}</div></div>
+      </section>);
 
   // placeholders simples
   const placeholderCard = (title: string, text: string) => (
@@ -398,7 +402,7 @@ export default function Home() {
           {placeholderCard("Tornado", torText)}
           {placeholderCard("Wildfire", "Enter your address and press Check.")}
         </div>
-        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave, Coldwave).</div>
+        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave, Cold Wave).</div>
       </main>
     </div>
   );
