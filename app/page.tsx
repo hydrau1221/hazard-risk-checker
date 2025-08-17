@@ -7,7 +7,7 @@ type RiskLevel =
   | "Very Low" | "Low" | "Moderate" | "High" | "Very High"
   | "Undetermined" | "Not Applicable";
 
-const LAYER_ID = 28;
+const LAYER_ID = 28; // FEMA NFHL - Flood Hazard Zones
 
 // Palette unique (inclut Not Applicable)
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
@@ -141,8 +141,11 @@ export default function Home() {
         const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
         const gj = await g.json();
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
-        lat = gj.lat; lon = gj.lon;
-        if (gj?.precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
+        const { lat: glat, lon: glon } = gj;
+        if (typeof glat !== "number" || typeof glon !== "number") throw new Error("Invalid coordinates.");
+        const precision = gj?.precision;
+        if (precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
+        lat = glat; lon = glon;
       }
 
       setLoading("fetch");
@@ -167,7 +170,7 @@ export default function Home() {
         fetch(`/api/tornado/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
-      // Flood
+      // Flood (texte sans répéter le niveau)
       if (femaRes.status === "fulfilled") {
         const r = femaRes.value; const j = await r.json();
         if (r.ok) {
@@ -200,7 +203,7 @@ export default function Home() {
         return parts.join(" — ");
       };
 
-      // Landslide
+      // Landslide (NRI)
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
         if (r.ok) {
@@ -210,7 +213,7 @@ export default function Home() {
         } else { setLsLevel(null); setLsText(j?.error || "NRI landslide query failed."); }
       } else { setLsLevel(null); setLsText("NRI landslide fetch failed."); }
 
-      // Wildfire
+      // Wildfire (NRI)
       if (wfRes.status === "fulfilled") {
         const r = wfRes.value; const j = await safeJson(r);
         if (r.ok && !j?.__nonjson) {
@@ -220,7 +223,7 @@ export default function Home() {
         } else { setWfLevel(null); setWfText("NRI wildfire query failed."); }
       } else { setWfLevel(null); setWfText("NRI wildfire fetch failed."); }
 
-      // Heatwave
+      // Heatwave (NRI)
       if (heatRes.status === "fulfilled") {
         const r = heatRes.value; const j = await r.json();
         if (r.ok) {
@@ -230,7 +233,7 @@ export default function Home() {
         } else { setHeatLevel(null); setHeatText(j?.error || "NRI heatwave query failed."); }
       } else { setHeatLevel(null); setHeatText("NRI heatwave fetch failed."); }
 
-      // Cold Wave
+      // Cold Wave (NRI)
       if (coldRes.status === "fulfilled") {
         const r = coldRes.value; const j = await r.json();
         if (r.ok) {
@@ -240,7 +243,7 @@ export default function Home() {
         } else { setColdLevel(null); setColdText(j?.error || "NRI cold wave query failed."); }
       } else { setColdLevel(null); setColdText("NRI cold wave fetch failed."); }
 
-      // Hurricane
+      // Hurricane (NRI ou autre)
       if (hurrRes.status === "fulfilled") {
         const r = hurrRes.value; const j = await r.json();
         if (r.ok) {
@@ -250,7 +253,7 @@ export default function Home() {
         } else { setHurrLevel(null); setHurrText(j?.error || "Hurricane query failed."); }
       } else { setHurrLevel(null); setHurrText("Hurricane fetch failed."); }
 
-      // Tornado
+      // Tornado (NRI)
       if (torRes.status === "fulfilled") {
         const r = torRes.value; const j = await r.json();
         if (r.ok) {
@@ -269,7 +272,7 @@ export default function Home() {
 
   // ---------- styles (branding) ----------
   const header = {
-    background: "linear-gradient(180deg, #0f172a 0%, #111827 100%)",
+    background: "#121212",
     color: "#e5e7eb",
     padding: "36px 16px 28px",
     textAlign: "center" as const,
@@ -289,16 +292,20 @@ export default function Home() {
   const subtitle = { opacity: 0.9, marginTop: 6, fontStyle: "italic" as const, color: "#cbd5e1" };
   const tagline  = { opacity: 0.9, marginTop: 10, color: "#e5e7eb" };
   const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 18, flexWrap: "wrap" as const, alignItems: "center" };
-  const input    = {
-    width: 560, maxWidth: "92vw", padding: "12px 14px 12px 40px",
-    borderRadius: 10, border: "1px solid #475569", background: "rgba(17,24,39,0.35)", color: "#e5e7eb",
+
+  // >>> Input sans icône + padding propre
+  const input = {
+    width: 560,
+    maxWidth: "92vw",
+    padding: "12px 14px",
+    borderRadius: 10,
+    border: "1px solid #475569",
+    background: "rgba(17,24,39,0.35)",
+    color: "#e5e7eb",
     outline: "none",
-    backgroundImage:
-      `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23cbd5e1" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"/></svg>')`,
-    backgroundRepeat: "no-repeat",
-    backgroundPosition: "12px center",
     transition: "border-color .15s ease, box-shadow .15s ease",
   } as const;
+
   const btn = {
     padding: "12px 18px", borderRadius: 10, border: "1px solid #1f2937",
     background: "#1f2937", color: "#e5e7eb", cursor: "pointer",
@@ -382,7 +389,7 @@ export default function Home() {
             style={input}
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="123 Main St, City, ST 12345 — or paste lat,lon"
+            placeholder="123 Main St, City, ST 12345"
             onKeyDown={(e) => { if (e.key === "Enter" && loading === "idle") onCheck(); }}
             aria-label="Address input"
           />
@@ -422,6 +429,30 @@ export default function Home() {
           </div>
           <div style={{ ...foot, marginTop: 8 }}>
             © {new Date().getFullYear()} Hydrau — Educational project • Privacy-friendly, no tracking.
+          </div>
+
+          {/* Lien LinkedIn centré */}
+          <div style={{ marginTop: 8 }}>
+            <a
+              href="https://www.linkedin.com/in/hydrau-830122327/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Hydrau on LinkedIn"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                color: "#0a66c2",
+                textDecoration: "none",
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="#0a66c2" d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.64c0-1.58-.03-3.62-2.21-3.62-2.22 0-2.56 1.73-2.56 3.52V23h-4V8z"/>
+              </svg>
+              Connect on LinkedIn
+            </a>
           </div>
         </div>
       </main>
