@@ -1,3 +1,4 @@
+// app/api/wildfire/homes/route.ts
 import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
@@ -9,26 +10,8 @@ const SOURCES: Array<{ url: string; name: string }> = [
   { url: "https://apps.fs.usda.gov/fsgisx01/rest/services/RDW_Wildfire/RMRS_WRC_RiskToPotentialStructures/ImageServer", name: "USFS RPS" },
 ];
 
-/** Paramétrage perf (env → personnalisation) */
-const MODE = (process.env.WFR_MODE || "fast").toLowerCase(); // "fast" | "deep"
-const STEP_M = Number(process.env.WFR_STEP || (MODE === "deep" ? "30" : "60"));         // pas radial
-const MAX_RADIUS_M = Number(process.env.WFR_MAX_RADIUS || (MODE === "deep" ? "300" : "180"));
-const TIMEOUT_MS = Number(process.env.WFR_TIMEOUT_MS || "1500");                        // timeout par requête
-const MAX_ATTEMPTS = Number(process.env.WFR_MAX_ATTEMPTS || (MODE === "deep" ? "120" : "60")); // garde-fou
-
-/** Variantes de lecture (peu en fast; plus en deep) */
-const RULES_FAST: Array<{ label: string; rule?: any; bands?: (number|undefined)[] }> = [
-  { label: "RPS_Class", rule: { rasterFunction: "RPS_Class" }, bands: [undefined] }, // classes 1..5
-  { label: "RPS",       rule: { rasterFunction: "RPS" },       bands: [undefined] }, // continu
-];
-const RULES_DEEP: Array<{ label: string; rule?: any; bands?: (number|undefined)[] }> = [
-  { label: "RPS_Class",        rule: { rasterFunction: "RPS_Class" },        bands: [undefined, 0, 1, 2, 3] },
-  { label: "ClassRPS",         rule: { rasterFunction: "ClassRPS" },         bands: [undefined, 0, 1, 2, 3] },
-  { label: "ClassifiedRPS",    rule: { rasterFunction: "ClassifiedRPS" },    bands: [undefined, 0, 1, 2, 3] },
-  { label: "RPS",              rule: { rasterFunction: "RPS" },              bands: [undefined, 0, 1, 2, 3] },
-  { label: "none",             rule: undefined,                               bands: [undefined, 0, 1, 2, 3] }, // valeur brute
-];
-const RULES = MODE === "deep" ? RULES_DEEP : RULES_FAST;
+/** Mode perf : fast (par défaut) ; tu peux forcer deep avec ?deep=1 */
+const DEFAULT_MODE = (process.env.WFR_MODE || "fast").toLowerCase(); // "fast" | "deep"
 
 type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined" | "Not Applicable";
 
@@ -70,14 +53,26 @@ async function fetchWithTimeout(url: string, ms: number) {
   }
 }
 
-/** Essaie séquentiellement les (rule, band) sur une source et renvoie la 1re valeur exploitable */
-async function tryVariants(baseUrl: string, lat: number, lon: number) {
-  let attempts = 0;
-  for (const rr of RULES) {
-    const bands = rr.bands || [undefined];
-    for (const band of bands) {
-      if (attempts++ >= MAX_ATTEMPTS) return { value: null, valueType: "unknown" as const, variant: null, attempts: [] as any[] };
+/** Essaie (rule, band) sur une source et renvoie la 1re valeur exploitable. */
+async function tryVariants(baseUrl: string, lat: number, lon: number, mode: "fast"|"deep") {
+  const TIMEOUT_MS = Number(process.env.WFR_TIMEOUT_MS || (mode === "deep" ? "2000" : "1500"));
 
+  // Variantes de lecture
+  const RULES = mode === "deep"
+    ? [
+        { label: "RPS_Class",        rule: { rasterFunction: "RPS_Class" },        bands: [undefined, 0, 1, 2, 3] },
+        { label: "ClassRPS",         rule: { rasterFunction: "ClassRPS" },         bands: [undefined, 0, 1, 2, 3] },
+        { label: "ClassifiedRPS",    rule: { rasterFunction: "ClassifiedRPS" },    bands: [undefined, 0, 1, 2, 3] },
+        { label: "RPS",              rule: { rasterFunction: "RPS" },              bands: [undefined, 0, 1, 2, 3] },
+        { label: "none",             rule: undefined,                               bands: [undefined, 0, 1, 2, 3] },
+      ]
+    : [
+        { label: "RPS_Class",        rule: { rasterFunction: "RPS_Class" },        bands: [undefined] },
+        { label: "RPS",              rule: { rasterFunction: "RPS" },              bands: [undefined] },
+      ];
+
+  for (const rr of RULES) {
+    for (const band of (rr.bands || [undefined])) {
       const params = new URLSearchParams({
         f: "json",
         geometry: JSON.stringify({ x: lon, y: lat, spatialReference: { wkid: 4326 } }),
@@ -85,77 +80,87 @@ async function tryVariants(baseUrl: string, lat: number, lon: number) {
         sr: "4326",
         returnFirstValueOnly: "true",
         interpolation: "RSP_NearestNeighbor",
+        // 👉 pixelSize ~270m (évite une pyramide trop “molle”)
+        pixelSize: JSON.stringify({ x: 0.0025, y: 0.0025, spatialReference: { wkid: 4326 } }),
       });
       if (rr.rule) params.set("renderingRule", JSON.stringify(rr.rule));
       if (band !== undefined) params.set("bandIds", String(band));
       const url = `${baseUrl}/getSamples?${params.toString()}`;
 
-      let ok = false, raw: any = null, valueType: "unknown" | "class" | "rps" = "unknown";
+      let ok = false, raw: any = null;
       try {
         const r = await fetchWithTimeout(url, TIMEOUT_MS);
         const txt = await r.text();
         const j: any = txt ? JSON.parse(txt) : null;
         ok = r.ok;
         raw = Array.isArray(j?.samples) && j.samples.length ? j.samples[0]?.value : null;
-      } catch { /* timeout/JSON → next */ }
+      } catch { /* timeout/parse → next variant */ }
 
-      // normalisation
+      // normalisation brute
       if (typeof raw === "string") {
         if (/nan/i.test(raw)) raw = null;
         else raw = raw.split(",")[0];
       }
       const num = Number(raw);
       const isNum = Number.isFinite(num);
-      const isNoData = !isNum || num === 0 || num === -9999 || Math.abs(num) > 1e20;
-      if (!ok || isNoData) continue;
 
-      // classes 1..5
+      // no-data usuels
+      if (!ok || !isNum || num === 0 || num === -9999 || Math.abs(num) > 1e20) continue;
+
+      // classes 1..5 ?
       if (Math.abs(num - Math.round(num)) < 1e-6 && num >= 1 && num <= 5) {
-        valueType = "class";
-        return { value: num, valueType, variant: { rr: rr.label, band }, attempts: [] as any[] };
+        return { value: num, valueType: "class" as const, variant: { rule: rr.label, band } };
       }
 
-      // continu → ramener à ~0–1020
+      // continu : remettre sur ~0–1020
       let rps = num;
-      if (num <= 1.5) rps = num * 1020;                // 0–1
-      else if (num > 1020 && num <= 2000) rps = (num / 2000) * 1020; // 0–2000
-      valueType = "rps";
-      return { value: rps, valueType, variant: { rr: rr.label, band }, attempts: [] as any[] };
+      if (num <= 1.5) {
+        rps = num * 1020;           // 0–1
+      } else if (num > 0 && num <= 100) {
+        rps = num * 10.2;           // ✅ 0–100 → 0–1020
+      } else if (num > 1020 && num <= 2000) {
+        rps = (num / 2000) * 1020;  // 0–2000 → 0–1020
+      }
+      return { value: rps, valueType: "rps" as const, variant: { rule: rr.label, band } };
     }
   }
-  return { value: null as number | null, valueType: "unknown" as const, variant: null as any, attempts: [] as any[] };
+  return { value: null as number | null, valueType: "unknown" as const, variant: null as any };
 }
 
-/** Cherche un pixel non no-data au plus près (jusqu’à MAX_RADIUS_M) */
-async function sampleNearest(lat: number, lon: number) {
+/** Cherche un pixel non-no-data au plus près (anneaux) */
+async function sampleNearest(lat: number, lon: number, mode: "fast"|"deep") {
+  const STEP_M = Number(process.env.WFR_STEP || (mode === "deep" ? "30" : "60"));
+  const MAX_RADIUS_M = Number(process.env.WFR_MAX_RADIUS || (mode === "deep" ? "300" : "180"));
+  const MAX_ATTEMPTS = Number(process.env.WFR_MAX_ATTEMPTS || (mode === "deep" ? "120" : "60"));
+
   let attempts = 0;
 
   for (const src of SOURCES) {
     // point direct
-    let res = await tryVariants(src.url, lat, lon);
+    let res = await tryVariants(src.url, lat, lon, mode);
     if (res.value != null) return { ...res, meters: 0, provider: src.name };
 
     // anneaux
     for (let radius = STEP_M; radius <= MAX_RADIUS_M; radius += STEP_M) {
-      const n = Math.max(8, Math.round((2 * Math.PI * radius) / STEP_M)); // ~1/STEP_M échantillons par mètre
+      const n = Math.max(8, Math.round((2 * Math.PI * radius) / STEP_M));
       const dLat = degPerMeterLat() * radius;
       const dLon = degPerMeterLon(lat) * radius;
 
       for (let i = 0; i < n; i++) {
-        if (++attempts >= MAX_ATTEMPTS) return { value: null, valueType: "unknown" as const, meters: null, provider: src.name };
+        if (++attempts >= MAX_ATTEMPTS) return { value: null, valueType: "unknown" as const, meters: null, provider: src.name, variant: null };
         const ang = (i / n) * 2 * Math.PI;
         const lt = lat + dLat * Math.sin(ang);
         const ln = lon + dLon * Math.cos(ang);
-        res = await tryVariants(src.url, lt, ln);
+        res = await tryVariants(src.url, lt, ln, mode);
         if (res.value != null) return { ...res, meters: radius, provider: src.name };
       }
     }
   }
 
-  return { value: null as number | null, valueType: "unknown" as const, meters: null as number | null, provider: null as string | null };
+  return { value: null as number | null, valueType: "unknown" as const, meters: null as number | null, provider: null as string | null, variant: null as any };
 }
 
-/** géocode interne (option adresse=) */
+/** géocode interne (option address=) */
 async function geocodeFromAddress(req: NextRequest, address: string) {
   const origin = new URL(req.url).origin;
   const u = `${origin}/api/geocode?address=${encodeURIComponent(address)}`;
@@ -172,6 +177,8 @@ export async function GET(req: NextRequest) {
   const lat = u.searchParams.get("lat");
   const lon = u.searchParams.get("lon");
   const debug = u.searchParams.get("debug") === "1";
+  const forceDeep = u.searchParams.get("deep") === "1";
+  const mode = forceDeep ? "deep" : (DEFAULT_MODE === "deep" ? "deep" : "fast");
 
   let latNum: number, lonNum: number, geocodeInfo: any = null;
   try {
@@ -189,7 +196,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Missing lat/lon" }, { status: 400 });
   }
 
-  const res = await sampleNearest(latNum, lonNum);
+  const res = await sampleNearest(latNum, lonNum, mode);
 
   let level: Five = "Not Applicable";
   if (res.valueType === "class") level = levelFromClassCode(res.value);
@@ -200,20 +207,17 @@ export async function GET(req: NextRequest) {
     value: res.value,
     adminUnit: "pixel",
     provider: res.provider || "Wildfire Risk to Communities (ImageServer)",
-    mode: MODE,
+    mode,
   };
   if (res.meters && res.meters > 0) body.note = `Nearest colored pixel used (~${res.meters} m).`;
   if (res.value == null && !res.meters) body.note = "No pixel value at this location (water / non-burnable / no structures).";
 
   if (debug) {
     body.debug = {
-      step: STEP_M, maxRadius: MAX_RADIUS_M, timeoutMs: TIMEOUT_MS, maxAttempts: MAX_ATTEMPTS, mode: MODE,
+      variant: res.variant || null, // { rule, band }
       geocode: geocodeInfo || null,
     };
   }
-
-  // 👉 Active le CDN si tu veux accélérer encore (cache 1 jour):
-  // return Response.json(body, { headers: { "cache-control": "s-maxage=86400, stale-while-revalidate=604800" } });
 
   return Response.json(body, { headers: { "cache-control": "no-store" } });
 }
