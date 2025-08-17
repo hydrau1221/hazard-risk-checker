@@ -84,9 +84,9 @@ export default function Home() {
   const [heatLevel, setHeatLevel] = useState<RiskLevel | null>(null);
   const [heatText, setHeatText] = useState<string>("Enter your address and press Check.");
 
-  // Placeholders
-  const [coldText] = useState<string>("Enter your address and press Check.");
-  const [torText]  = useState<string>("Enter your address and press Check.");
+  // Cold Wave
+  const [coldLevel, setColdLevel] = useState<RiskLevel | null>(null);
+  const [coldText, setColdText]   = useState<string>("Enter your address and press Check.");
 
   const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +111,7 @@ export default function Home() {
     setLsLevel(null);    setLsText("Geocoding address…");
     setHurrLevel(null);  setHurrText("Geocoding address…");
     setHeatLevel(null);  setHeatText("Geocoding address…");
+    setColdLevel(null);  setColdText("Geocoding address…");
 
     try {
       // 1) lat,lon direct ?
@@ -142,6 +143,7 @@ export default function Home() {
       setLsText("Querying NRI Landslide…");
       setHurrText("Querying NRI Hurricane…");
       setHeatText("Querying NRI Heatwave…");
+      setColdText("Querying NRI Cold Wave…");
 
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes, hurrRes, heatRes] = await Promise.allSettled([
@@ -150,6 +152,7 @@ export default function Home() {
         fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
       ]);
 
       // Flood
@@ -246,6 +249,30 @@ if (heatRes.status === "fulfilled") {
       setLoading("idle");
     }
   }
+  
+// Cold Wave (NRI)
+if (coldRes.status === "fulfilled") {
+  const r = coldRes.value; const j = await r.json();
+  if (r.ok) {
+    const lvl = (j.level as RiskLevel) ?? "Undetermined";
+    setColdLevel(lvl);
+    const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+    const head =
+      (lvl === "Undetermined") ? "UNDETERMINED" :
+      (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+      `${String(lvl).toUpperCase()} RISK`;
+    const scorePart = s !== null ? ` — score ${s}` : "";
+    const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+    setColdText(`${head}${scorePart}${srcPart}`);
+  } else {
+    // active quand même la carte avec badge UNDETERMINED
+    setColdLevel("Undetermined");
+    setColdText(j?.error || "NRI cold wave query failed.");
+  }
+} else {
+  setColdLevel("Undetermined");
+  setColdText("NRI cold wave fetch failed.");
+}
 
   // ---------- styles ----------
   const header   = { background: "#0b396b", color: "white", padding: "28px 16px", textAlign: "center" as const };
@@ -329,6 +356,21 @@ if (heatRes.status === "fulfilled") {
         <div style={cardBody}><div style={small} aria-live="polite">{heatText}</div></div>
       </section>);
 
+  const coldCard = coldLevel == null
+  ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Cold Wave</h2></div><div style={cardBody}><div style={small} aria-live="polite">{coldText}</div></div></section>)
+  : (<section style={{ ...card, border: `1px solid ${PALETTE[coldLevel].border}` }}>
+      <div style={coloredHeader(coldLevel)}><h2 style={{ ...h2, margin: 0 }}>Cold Wave</h2>
+        <div style={{ marginTop: 6 }}>
+          <span style={badge(coldLevel)}>
+            {coldLevel === "Undetermined" ? "UNDETERMINED"
+              : coldLevel === "Not Applicable" ? "NOT APPLICABLE"
+              : `${coldLevel.toUpperCase()} RISK`}
+          </span>
+        </div>
+      </div>
+      <div style={cardBody}><div style={small} aria-live="polite">{coldText}</div></div>
+    </section>);
+
   // placeholders simples
   const placeholderCard = (title: string, text: string) => (
     <section style={card}>
@@ -371,11 +413,11 @@ if (heatRes.status === "fulfilled") {
           {lsCard}
           {hurrCard}
           {heatCard}
-          {placeholderCard("Cold Wave", coldText)}
+          {coldCard}
           {placeholderCard("Tornado", torText)}
           {placeholderCard("Wildfire", "Enter your address and press Check.")}
         </div>
-        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave).</div>
+        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave, Coldwave).</div>
       </main>
     </div>
   );
