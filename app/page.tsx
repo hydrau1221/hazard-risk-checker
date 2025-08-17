@@ -76,12 +76,15 @@ export default function Home() {
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
   const [lsText, setLsText] = useState<string>("Enter your address and press Check.");
 
-  // Hurricane (nouveau)
+  // Hurricane
   const [hurrLevel, setHurrLevel] = useState<RiskLevel | null>(null);
   const [hurrText, setHurrText] = useState<string>("Enter your address and press Check.");
 
-  // Placeholders (interface seulement)
-  const [heatText] = useState<string>("Enter your address and press Check.");
+  // Heatwave (nouveau)
+  const [heatLevel, setHeatLevel] = useState<RiskLevel | null>(null);
+  const [heatText, setHeatText] = useState<string>("Enter your address and press Check.");
+
+  // Placeholders
   const [coldText] = useState<string>("Enter your address and press Check.");
   const [torText]  = useState<string>("Enter your address and press Check.");
 
@@ -107,6 +110,7 @@ export default function Home() {
     setEqLevel(null);    setEqText("Geocoding address…");
     setLsLevel(null);    setLsText("Geocoding address…");
     setHurrLevel(null);  setHurrText("Geocoding address…");
+    setHeatLevel(null);  setHeatText("Geocoding address…");
 
     try {
       // 1) lat,lon direct ?
@@ -122,19 +126,13 @@ export default function Home() {
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
         lat = gj.lat; lon = gj.lon;
 
-// Si le géocode est retombé sur un centroïde de ville,
-// on affiche une note explicite pour l’utilisateur.
-const isCityCentroid =
-  (gj && (gj.precision === "city" || gj.mode === "city"));
-
-if (isCityCentroid) {
-  const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
-  setGeoNote(
-    `Exact address not found. Using city centroid${label ? `: ${label}` : ""}`
-  );
-} else {
-  setGeoNote(null);
-}
+        // Si on a un centroïde de ville, on affiche la note explicite
+        const isCityCentroid = (gj && (gj.precision === "city" || gj.mode === "city"));
+        if (isCityCentroid) {
+          const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
+          setGeoNote(`Exact address not found. Using city centroid${label ? `: ${label}` : ""}. Results are generalized.`);
+        } else {
+          setGeoNote(null);
         }
       }
 
@@ -143,13 +141,15 @@ if (isCityCentroid) {
       setEqText("Querying USGS (Design Maps)…");
       setLsText("Querying NRI Landslide…");
       setHurrText("Querying NRI Hurricane…");
+      setHeatText("Querying NRI Heatwave…");
 
       // 2) requêtes parallèles
-      const [femaRes, eqRes, lsRes, hurrRes] = await Promise.allSettled([
+      const [femaRes, eqRes, lsRes, hurrRes, heatRes] = await Promise.allSettled([
         fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
         fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
       // Flood
@@ -179,10 +179,7 @@ if (isCityCentroid) {
         if (r.ok) {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setLsLevel(lvl);
-          const s =
-            Number.isFinite(Number(j.score))
-              ? Math.round(Number(j.score) * 10) / 10
-              : null;
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
           const head =
             (lvl === "Undetermined") ? "UNDETERMINED" :
             (lvl === "Not Applicable") ? "NOT APPLICABLE" :
@@ -203,10 +200,7 @@ if (isCityCentroid) {
         if (r.ok) {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setHurrLevel(lvl);
-          const s =
-            Number.isFinite(Number(j.score))
-              ? Math.round(Number(j.score) * 10) / 10
-              : null;
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
           const head =
             (lvl === "Undetermined") ? "UNDETERMINED" :
             (lvl === "Not Applicable") ? "NOT APPLICABLE" :
@@ -219,6 +213,27 @@ if (isCityCentroid) {
         }
       } else {
         setHurrLevel(null); setHurrText("NRI hurricane fetch failed.");
+      }
+
+      // Heatwave (NRI)
+      if (heatRes.status === "fulfilled") {
+        const r = heatRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setHeatLevel(lvl);
+          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+          const head =
+            (lvl === "Undetermined") ? "UNDETERMINED" :
+            (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+            `${String(lvl).toUpperCase()} RISK`;
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          setHeatText(`${head}${scorePart}${srcPart}`);
+        } else {
+          setHeatLevel(null); setHeatText(j?.error || "NRI heatwave query failed.");
+        }
+      } else {
+        setHeatLevel(null); setHeatText("NRI heatwave fetch failed.");
       }
 
     } catch (e: any) {
@@ -295,6 +310,21 @@ if (isCityCentroid) {
         <div style={cardBody}><div style={small} aria-live="polite">{hurrText}</div></div>
       </section>);
 
+  const heatCard = heatLevel == null
+    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Heatwave</h2></div><div style={cardBody}><div style={small} aria-live="polite">{heatText}</div></div></section>)
+    : (<section style={{ ...card, border: `1px solid ${PALETTE[heatLevel].border}` }}>
+        <div style={coloredHeader(heatLevel)}><h2 style={{ ...h2, margin: 0 }}>Heatwave</h2>
+          <div style={{ marginTop: 6 }}>
+            <span style={badge(heatLevel)}>
+              {heatLevel === "Undetermined" ? "UNDETERMINED"
+                : heatLevel === "Not Applicable" ? "NOT APPLICABLE"
+                : `${heatLevel.toUpperCase()} RISK`}
+            </span>
+          </div>
+        </div>
+        <div style={cardBody}><div style={small} aria-live="polite">{heatText}</div></div>
+      </section>);
+
   // placeholders simples
   const placeholderCard = (title: string, text: string) => (
     <section style={card}>
@@ -336,12 +366,12 @@ if (isCityCentroid) {
           {eqCard}
           {lsCard}
           {hurrCard}
-          {placeholderCard("Heatwave", heatText)}
+          {heatCard}
           {placeholderCard("Cold Wave", coldText)}
           {placeholderCard("Tornado", torText)}
           {placeholderCard("Wildfire", "Enter your address and press Check.")}
         </div>
-        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane).</div>
+        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave).</div>
       </main>
     </div>
   );
