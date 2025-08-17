@@ -3,11 +3,13 @@
 import { useState } from "react";
 
 type Feature = { attributes: Record<string, any> };
-type RiskLevel = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined";
+type RiskLevel =
+  | "Very Low" | "Low" | "Moderate" | "High" | "Very High"
+  | "Undetermined" | "Not Applicable";
 
 const LAYER_ID = 28; // FEMA NFHL - Flood Hazard Zones
 
-// Palette unique pour toutes les cartes
+// Palette unique (ajout de "Not Applicable")
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
   "Very Low":   { bg: "#dcfce7", badge: "#16a34a", text: "#14532d", border: "#86efac" },
   Low:          { bg: "#dbeafe", badge: "#1d4ed8", text: "#0c4a6e", border: "#93c5fd" },
@@ -15,6 +17,7 @@ const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; bord
   High:         { bg: "#ffedd5", badge: "#ea580c", text: "#7c2d12", border: "#fdba74" },
   "Very High":  { bg: "#fee2e2", badge: "#dc2626", text: "#7f1d1d", border: "#fecaca" },
   Undetermined: { bg: "#f3f4f6", badge: "#6b7280", text: "#374151", border: "#d1d5db" },
+  "Not Applicable": { bg: "#f1f5f9", badge: "#64748b", text: "#334155", border: "#cbd5e1" }, // slate
 };
 
 // ---------- Flood classification ----------
@@ -35,7 +38,6 @@ function classifyFlood(features: Feature[] | null): {
     a.SFHA_TF === true || a.SFHA_TF === "T" || a.SFHA_TF === "Y" ||
     ["A","AE","AO","AH","A1","A2","A3","A99","VE","V","V1"].some(p => zone.startsWith(p));
 
-  // Détections utiles
   const isFloodway = subty.includes("FLOODWAY");
   const isShadedX =
     zone === "X" &&
@@ -74,8 +76,11 @@ export default function Home() {
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
   const [lsText, setLsText] = useState<string>("Enter your address and press Check.");
 
+  // Hurricane (nouveau)
+  const [hurrLevel, setHurrLevel] = useState<RiskLevel | null>(null);
+  const [hurrText, setHurrText] = useState<string>("Enter your address and press Check.");
+
   // Placeholders (interface seulement)
-  const [hurrText] = useState<string>("Enter your address and press Check.");
   const [heatText] = useState<string>("Enter your address and press Check.");
   const [coldText] = useState<string>("Enter your address and press Check.");
   const [torText]  = useState<string>("Enter your address and press Check.");
@@ -97,6 +102,7 @@ export default function Home() {
     setFloodLevel(null); setFloodText("Geocoding address…");
     setEqLevel(null);    setEqText("Geocoding address…");
     setLsLevel(null);    setLsText("Geocoding address…");
+    setHurrLevel(null);  setHurrText("Geocoding address…");
 
     try {
       // 1) lat,lon direct ?
@@ -106,7 +112,6 @@ export default function Home() {
       if (ll) {
         lat = ll.lat; lon = ll.lon;
       } else {
-        // géocoder
         const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
         const gj = await g.json();
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
@@ -117,14 +122,14 @@ export default function Home() {
       setFloodText("Querying FEMA NFHL…");
       setEqText("Querying USGS (Design Maps)…");
       setLsText("Querying NRI Landslide…");
-
-      const dbg = ""; // debug désactivé côté UI
+      setHurrText("Querying NRI Hurricane…");
 
       // 2) requêtes parallèles
-      const [femaRes, eqRes, lsRes] = await Promise.allSettled([
-        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}${dbg}`, { cache: "no-store" }),
-        fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}${dbg}`, { cache: "no-store" }),
-        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}${dbg}`, { cache: "no-store" }),
+      const [femaRes, eqRes, lsRes, hurrRes] = await Promise.allSettled([
+        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
+        fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
       // Flood
@@ -148,34 +153,52 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Landslide (NRI)
+      // Landslide
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
-
         if (r.ok) {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setLsLevel(lvl);
-
           const s =
             Number.isFinite(Number(j.score))
               ? Math.round(Number(j.score) * 10) / 10
               : null;
-
-          const head = (lvl === "Undetermined")
-            ? "UNDETERMINED"
-            : `${String(lvl).toUpperCase()} RISK`;
-
+          const head =
+            (lvl === "Undetermined") ? "UNDETERMINED" :
+            (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+            `${String(lvl).toUpperCase()} RISK`;
           const scorePart = s !== null ? ` — score ${s}` : "";
           const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-
           setLsText(`${head} susceptibility${scorePart}${srcPart}`);
         } else {
-          setLsLevel(null);
-          setLsText(j?.error || "NRI landslide query failed.");
+          setLsLevel(null); setLsText(j?.error || "NRI landslide query failed.");
         }
       } else {
-        setLsLevel(null);
-        setLsText("NRI landslide fetch failed.");
+        setLsLevel(null); setLsText("NRI landslide fetch failed.");
+      }
+
+      // Hurricane (NRI)
+      if (hurrRes.status === "fulfilled") {
+        const r = hurrRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setHurrLevel(lvl);
+          const s =
+            Number.isFinite(Number(j.score))
+              ? Math.round(Number(j.score) * 10) / 10
+              : null;
+          const head =
+            (lvl === "Undetermined") ? "UNDETERMINED" :
+            (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+            `${String(lvl).toUpperCase()} RISK`;
+          const scorePart = s !== null ? ` — score ${s}` : "";
+          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+          setHurrText(`${head}${scorePart}${srcPart}`);
+        } else {
+          setHurrLevel(null); setHurrText(j?.error || "NRI hurricane query failed.");
+        }
+      } else {
+        setHurrLevel(null); setHurrText("NRI hurricane fetch failed.");
       }
 
     } catch (e: any) {
@@ -191,7 +214,7 @@ export default function Home() {
   const subtitle = { opacity: 0.9, marginTop: 8 };
   const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 16, flexWrap: "wrap" as const, alignItems: "center" };
   const input    = { width: 420, maxWidth: "90vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" };
-  const btn      = { padding: "10px 16px", borderRadius: 6, border: "1px solid #0b396b", background: "#114d8a", color: "white", cursor: "pointer" };
+  const btn      = { padding: "10px 16px", borderRadius: 6, border: "1px solid "#0b396b", background: "#114d8a", color: "white", cursor: "pointer" } as any;
   const gridWrap = { background: "#eef2f6", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
   const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 1100, margin: "20px auto" };
   const card     = { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
@@ -237,15 +260,26 @@ export default function Home() {
         <div style={cardBody}><div style={small} aria-live="polite">{lsText}</div></div>
       </section>);
 
-  // Cartes placeholders (interface seulement)
+  const hurrCard = hurrLevel == null
+    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Hurricane</h2></div><div style={cardBody}><div style={small} aria-live="polite">{hurrText}</div></div></section>)
+    : (<section style={{ ...card, border: `1px solid ${PALETTE[hurrLevel].border}` }}>
+        <div style={coloredHeader(hurrLevel)}><h2 style={{ ...h2, margin: 0 }}>Hurricane</h2>
+          <div style={{ marginTop: 6 }}>
+            <span style={badge(hurrLevel)}>
+              {hurrLevel === "Undetermined" ? "UNDETERMINED"
+                : hurrLevel === "Not Applicable" ? "NOT APPLICABLE"
+                : `${hurrLevel.toUpperCase()} RISK`}
+            </span>
+          </div>
+        </div>
+        <div style={cardBody}><div style={small} aria-live="polite">{hurrText}</div></div>
+      </section>);
+
+  // placeholders simples
   const placeholderCard = (title: string, text: string) => (
     <section style={card}>
-      <div style={sectionHeader}>
-        <h2 style={{ ...h2, margin: 0 }}>{title}</h2>
-      </div>
-      <div style={cardBody}>
-        <div style={small}>{text}</div>
-      </div>
+      <div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>{title}</h2></div>
+      <div style={cardBody}><div style={small}>{text}</div></div>
     </section>
   );
 
@@ -274,13 +308,13 @@ export default function Home() {
           {floodCard}
           {eqCard}
           {lsCard}
-          {placeholderCard("Wildfire", "Enter your address and press Check.")}
-          {placeholderCard("Hurricane", hurrText)}
+          {hurrCard}
           {placeholderCard("Heatwave", heatText)}
           {placeholderCard("Cold Wave", coldText)}
           {placeholderCard("Tornado", torText)}
+          {placeholderCard("Wildfire", "Enter your address and press Check.")}
         </div>
-        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide).</div>
+        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane).</div>
       </main>
     </div>
   );
