@@ -188,17 +188,17 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Helper pour formatter les cartes NRI : "susceptibility — score XX.X — tract <ID>"
+      // -------- Helper NRI (MIS À JOUR) --------
+      // Affiche: "<level en minuscule> risk — susceptibility — score XX.X — tract <ID>"
+      // Et si lvl = NA/Undetermined => chaîne vide (rien dans l'encadré blanc).
       const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
+        if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
+        const levelWord = `${String(lvl).toLowerCase()} risk`;
         const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
-        const head = (lvl === "Undetermined" || lvl === "Not Applicable")
-          ? "" // pas de "susceptibility" pour ces cas
-          : "susceptibility";
-        const parts: string[] = [];
-        if (head) parts.push(head);
+        const parts: string[] = [levelWord, "susceptibility"];
         if (s !== null) parts.push(`score ${s}`);
         if (tractId) parts.push(`tract ${tractId}`);
-        return parts.join(" — ") || ""; // peut être vide si NA/Undetermined et pas de score
+        return parts.join(" — ");
       };
 
       // Landslide (NRI)
@@ -247,11 +247,7 @@ export default function Home() {
         if (r.ok) {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setHurrLevel(lvl);
-          // si c’est NRI on réutilisera formatNri quand la route renverra score/tractId
-          const msg = j.score != null || j.tractId
-            ? formatNri(lvl, j.score, j.tractId || null)
-            : ""; // sinon, pas de texte spécifique
-          setHurrText(msg);
+          setHurrText(formatNri(lvl, j.score, j.tractId || null));
         } else { setHurrLevel(null); setHurrText(j?.error || "Hurricane query failed."); }
       } else { setHurrLevel(null); setHurrText("Hurricane fetch failed."); }
 
