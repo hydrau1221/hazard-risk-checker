@@ -431,29 +431,20 @@ export default function Home() {
             © {new Date().getFullYear()} Hydrau — Educational project • Privacy-friendly, no tracking.
           </div>
 
-          {/* Lien LinkedIn centré */}
-          <div style={{ marginTop: 8 }}>
-            <a
-              href="https://www.linkedin.com/in/hydrau-830122327/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Hydrau on LinkedIn"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                color: "#0a66c2",
-                textDecoration: "none",
-                fontSize: 14,
-                fontWeight: 600,
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="#0a66c2" d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.64c0-1.58-.03-3.62-2.21-3.62-2.22 0-2.56 1.73-2.56 3.52V23h-4V8z"/>
-              </svg>
-              Connect on LinkedIn
-            </a>
-          </div>
+{/* Lien LinkedIn centré (une seule ligne) */}
+<div style={{ marginTop: 10 }} className="social">
+  <a
+    href="https://www.linkedin.com/in/hydrau-830122327/"
+    target="_blank"
+    rel="noopener noreferrer"
+    aria-label="Hydrau on LinkedIn"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.64c0-1.58-.03-3.62-2.21-3.62-2.22 0-2.56 1.73-2.56 3.52V23h-4V8z"/>
+    </svg>
+    <span>Connect on LinkedIn</span>
+  </a>
+</div>
         </div>
       </main>
 
@@ -469,4 +460,24 @@ export default function Home() {
       `}</style>
     </div>
   );
+}
+.social { text-align: center; }
+.social a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #0a66c2;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;        /* évite le retour à la ligne */
+}
+.social a:hover { text-decoration: underline; }
+.social a svg {
+  width: 18px;
+  height: 18px;
+  color: #0a66c2;             /* utilise currentColor */
+  display: inline-block;      /* évite le saut de ligne */
+  vertical-align: middle;     /* alignement propre */
+  flex: 0 0 18px;
 }
