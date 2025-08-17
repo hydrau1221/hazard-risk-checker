@@ -1,10 +1,8 @@
-// app/api/wildfire/risk/route.ts
 import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** NRI – mêmes services que ta route Landslide */
 const NRI_TRACTS =
   process.env.NRI_TRACTS_URL ??
   "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0";
@@ -14,7 +12,6 @@ const NRI_COUNTIES =
 
 type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined" | "Not Applicable";
 
-/** Mappe le libellé NRI (WFIR_RISKR) → nos 5 niveaux */
 function mapLabelToFive(raw: unknown): Five {
   if (raw == null) return "Undetermined";
   const s = String(raw).toLowerCase().replace(/[\s_\-()/]+/g, "");
@@ -28,7 +25,6 @@ function mapLabelToFive(raw: unknown): Five {
   return "Undetermined";
 }
 
-/** Cherche un attribut (gère préfixes/variantes) */
 function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   for (const k of Object.keys(attrs)) {
     const up = k.toUpperCase();
@@ -37,64 +33,40 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   return null;
 }
 
-/** Extraction stricte WFIR:
- *  - Catégorie officielle : ...WFIR_RISKR ("Relatively ...")
- *  - Score Wildfire :      ...WFIR_RISKS (0–100)
- */
 function extract(attrs: Record<string, any>) {
-  const riskR = findAttr(attrs, [
-    /(^|_)WFIR_RISKR$/i,
-    /(^|_)WFIR.*_RISKR$/i,
-  ]);
-
-  // Lecture stricte WFIR_RISKS, avec fallback prudent
-  let riskS = findAttr(attrs, [
-    /(^|_)WFIR_RISKS$/i,
-  ]);
+  const riskR = findAttr(attrs, [/(^|_)WFIR_RISKR$/i, /(^|_)WFIR.*_RISKR$/i]);
+  let riskS = findAttr(attrs, [/(^|_)WFIR_RISKS$/i]);
   if (!riskS) {
     const keys = Object.keys(attrs);
     const cand = keys.find(k => {
       const up = k.toUpperCase();
-      return up.includes("WFIR")
-        && up.endsWith("RISKS")
-        && !up.includes("RISKR")
-        && !up.includes("RANK")
-        && !up.includes("PCTL")
-        && !up.includes("INDEX");
+      return up.includes("WFIR") && up.endsWith("RISKS")
+        && !up.includes("RISKR") && !up.includes("RANK") && !up.includes("PCTL") && !up.includes("INDEX");
     });
     if (cand) riskS = { key: cand, value: attrs[cand] };
   }
 
   let score: number | null = null;
   if (riskS && typeof riskS.value === "number" && Number.isFinite(riskS.value)) {
-    score = riskS.value; // NRI WFIR_RISKS est déjà 0–100
+    score = riskS.value; // 0–100
   }
-
   const level = mapLabelToFive(riskR?.value);
 
-  return {
-    level,
+  return { level,
     label: riskR?.value == null ? null : String(riskR.value),
     score,
-    usedFields: { labelField: riskR?.key ?? null, scoreField: riskS?.key ?? null },
-  };
+    usedFields: { labelField: riskR?.key ?? null, scoreField: riskS?.key ?? null } };
 }
 
-/** Petit buffer géodésique (pour envelopes) */
 function tinyEnvelope(lon: number, lat: number, meters = 50) {
   const degLat = meters / 111_320;
   const degLon = meters / (111_320 * Math.cos((lat * Math.PI) / 180) || 1);
   return { xmin: lon - degLon, ymin: lat - degLat, xmax: lon + degLon, ymax: lat + degLat };
 }
 
-/** Query ArcGIS générique */
 async function query(feature0Url: string, p: Record<string, string>) {
   const params = new URLSearchParams({
-    f: "json",
-    outFields: "*",
-    returnGeometry: "false",
-    resultRecordCount: "1",
-    ...p,
+    f: "json", outFields: "*", returnGeometry: "false", resultRecordCount: "1", ...p
   });
   const url = `${feature0Url}/query?${params.toString()}`;
   const r = await fetch(url, { cache: "no-store" });
@@ -105,43 +77,31 @@ async function query(feature0Url: string, p: Record<string, string>) {
   return { ok: true as const, url, attrs: feat?.attributes ?? null };
 }
 
-/** Sélection robuste (WITHIN→INTERSECTS toléré→envelope) */
 async function pickFeature(feature0Url: string, lon: number, lat: number) {
   const attempts: Array<{ step: string; url: string }> = [];
 
-  // WITHIN
   const pWithin = await query(feature0Url, {
     geometry: JSON.stringify({ x: lon, y: lat }),
-    geometryType: "esriGeometryPoint",
-    inSR: "4326",
-    spatialRel: "esriSpatialRelWithin",
+    geometryType: "esriGeometryPoint", inSR: "4326", spatialRel: "esriSpatialRelWithin",
   });
   attempts.push({ step: "point:within", url: (pWithin as any).url });
   if (pWithin.ok && pWithin.attrs) return { pick: pWithin, attempts };
 
-  // INTERSECTS tolérance 3→7→15→30 m
   for (const d of [3, 7, 15, 30]) {
     const pInter = await query(feature0Url, {
       geometry: JSON.stringify({ x: lon, y: lat }),
-      geometryType: "esriGeometryPoint",
-      inSR: "4326",
-      spatialRel: "esriSpatialRelIntersects",
-      distance: String(d),
-      units: "esriSRUnit_Meter",
+      geometryType: "esriGeometryPoint", inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects", distance: String(d), units: "esriSRUnit_Meter",
     });
     attempts.push({ step: `point:intersects:${d}m`, url: (pInter as any).url });
     if (pInter.ok && pInter.attrs) return { pick: pInter, attempts };
   }
 
-  // Envelope ~50 m
   const env = tinyEnvelope(lon, lat, 50);
   const eInter = await query(feature0Url, {
-    geometry: JSON.stringify({
-      xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax, spatialReference: { wkid: 4326 },
-    }),
-    geometryType: "esriGeometryEnvelope",
-    inSR: "4326",
-    spatialRel: "esriSpatialRelIntersects",
+    geometry: JSON.stringify({ xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax,
+      spatialReference: { wkid: 4326 } }),
+    geometryType: "esriGeometryEnvelope", inSR: "4326", spatialRel: "esriSpatialRelIntersects",
   });
   attempts.push({ step: "envelope:intersects:50m", url: (eInter as any).url });
   if (eInter.ok && eInter.attrs) return { pick: eInter, attempts };
@@ -149,7 +109,6 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
   return { pick: null as any, attempts };
 }
 
-/** Géocode interne via /api/geocode (option address=) */
 async function geocodeFromAddress(req: NextRequest, address: string) {
   const origin = new URL(req.url).origin;
   const url = `${origin}/api/geocode?address=${encodeURIComponent(address)}`;
@@ -164,7 +123,6 @@ export async function GET(req: NextRequest) {
   const u = new URL(req.url);
   const debug = u.searchParams.get("debug") === "1";
 
-  // lat/lon direct ou address=
   let lat = u.searchParams.get("lat");
   let lon = u.searchParams.get("lon");
   const address = u.searchParams.get("address");
@@ -177,8 +135,7 @@ export async function GET(req: NextRequest) {
       const g = await geocodeFromAddress(req, address);
       latNum = g.lat; lonNum = g.lon; geocodeInfo = g.geocode;
     } else {
-      latNum = Number(lat);
-      lonNum = Number(lon);
+      latNum = Number(lat); lonNum = Number(lon);
     }
   } catch (e: any) {
     return Response.json({ error: e?.message || "geocode error" }, { status: 400 });
@@ -190,7 +147,6 @@ export async function GET(req: NextRequest) {
 
   const steps: any[] = [];
 
-  // 1) TRACT prioritaire
   const tractTry = await pickFeature(NRI_TRACTS, lonNum, latNum);
   steps.push({ unit: "tract", attempts: tractTry.attempts });
   if (tractTry.pick && tractTry.pick.ok && tractTry.pick.attrs) {
@@ -200,23 +156,15 @@ export async function GET(req: NextRequest) {
     const state  = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
     const body: any = {
-      level: out.level,
-      label: out.label,
-      score: out.score,            // WFIR_RISKS (0–100)
-      adminUnit: "tract",
-      county, state,
-      provider: "FEMA National Risk Index (tract)",
+      level: out.level, label: out.label, score: out.score,
+      adminUnit: "tract", county, state, provider: "FEMA National Risk Index (tract)",
     };
     if (debug) body.debug = {
-      geocode: geocodeInfo ?? null,
-      steps,
-      usedFields: out.usedFields,
-      attrKeys: Object.keys(attrs).sort(),
+      geocode: geocodeInfo ?? null, steps, usedFields: out.usedFields, attrKeys: Object.keys(attrs).sort(),
     };
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  // 2) COUNTY fallback
   const countyTry = await pickFeature(NRI_COUNTIES, lonNum, latNum);
   steps.push({ unit: "county", attempts: countyTry.attempts });
   if (countyTry.pick && countyTry.pick.ok && countyTry.pick.attrs) {
@@ -226,23 +174,16 @@ export async function GET(req: NextRequest) {
     const state      = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
     const body: any = {
-      level: out.level,
-      label: out.label,
-      score: out.score,
-      adminUnit: "county",
-      county: countyName, state,
+      level: out.level, label: out.label, score: out.score,
+      adminUnit: "county", county: countyName, state,
       provider: "FEMA National Risk Index (county)",
     };
     if (debug) body.debug = {
-      geocode: geocodeInfo ?? null,
-      steps,
-      usedFields: out.usedFields,
-      attrKeys: Object.keys(attrs).sort(),
+      geocode: geocodeInfo ?? null, steps, usedFields: out.usedFields, attrKeys: Object.keys(attrs).sort(),
     };
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
-  // 3) Rien
   const res: any = { level: "Undetermined", label: "No Rating", provider: "FEMA NRI" };
   if (debug) res.debug = { geocode: geocodeInfo ?? null, steps };
   return Response.json(res);
