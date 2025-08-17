@@ -1,4 +1,3 @@
-// app/api/geocode/route.ts
 import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +38,7 @@ async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
     const lat = Number(m?.coordinates?.y);
     const lon = Number(m?.coordinates?.x);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return ok(lat, lon, { matched: m?.matchedAddress ?? null, source: "census", benchmark, mode: "structured" });
+      return ok(lat, lon, { matched: m?.matchedAddress ?? null, source: "census", benchmark, mode: "structured", precision: "rooftop" });
     }
   }
   return null;
@@ -47,14 +46,30 @@ async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
 
 async function osm(addr: string, attempts: any[]) {
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(addr)}`;
-  const r = await fetch(url, { cache: "no-store", headers: { "User-Agent": "HydrauRiskChecker/1.0 (contact)" } });
+  const r = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      "User-Agent": "HydrauRiskChecker/1.0 (contact@example.com)",
+      "Accept-Language": "en-US",
+      "Referer": "https://your-vercel-domain.vercel.app/"
+    }
+  });
   const arr: any[] = await r.json();
   attempts.push({ engine: "nominatim", url, status: r.status, count: arr?.length ?? 0 });
   if (r.ok && Array.isArray(arr) && arr.length > 0) {
     const it = arr[0];
     const lat = Number(it.lat), lon = Number(it.lon);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return ok(lat, lon, { display_name: it.display_name ?? null, source: "nominatim" });
+      const precision =
+        it.class === "building" ? "rooftop" :
+        it.class === "highway" ? "street"  :
+        (it.type === "city" || it.type === "administrative") ? "city" :
+        it.type || it.class || "unknown";
+      return ok(lat, lon, {
+        display_name: it.display_name ?? null,
+        source: "nominatim",
+        precision
+      });
     }
   }
   return null;
