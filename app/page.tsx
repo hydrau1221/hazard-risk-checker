@@ -26,31 +26,41 @@ function classifyFlood(features: Feature[] | null): {
   }
   const a = features[0].attributes || {};
   const zone = String(a.FLD_ZONE ?? a.ZONE ?? a.ZONE_SUBTY ?? a.ZONE_SUBTYPE ?? "N/A").toUpperCase();
-  const subty = String(a.ZONE_SUBTY ?? a.ZONE_SUBTYPE ?? a.ZONE ?? "").toUpperCase();
+  const subty = String(a.ZONE_SUBTY ?? a.ZONE_SUBTYPE ?? "").toUpperCase();
+
   const bfeRaw = a.BFE ?? a.STATIC_BFE ?? a.DEPTH ?? null;
   const bfe = bfeRaw == null || Number(bfeRaw) === -9999 ? null : String(bfeRaw);
 
   const inSFHA =
     a.SFHA_TF === true || a.SFHA_TF === "T" || a.SFHA_TF === "Y" ||
-    ["A","AE","AO","AH","A1","A2","A3","A99","VE"].some(p => zone.startsWith(p));
+    ["A","AE","AO","AH","A1","A2","A3","A99","VE","V","V1"].some(p => zone.startsWith(p));
+
+  // Détections utiles
+  const isFloodway = subty.includes("FLOODWAY");
+  const isShadedX =
+    zone === "X" &&
+    (subty.includes("0.2") || subty.includes("0.2 PCT") || subty.includes("0.2%") || subty.includes("SHADED"));
 
   let level: RiskLevel, note = "";
-  if (zone.startsWith("VE")) { level = "Very High"; note = "Coastal high hazard (wave action)"; }
+  if (zone.startsWith("VE") || zone.startsWith("V")) { level = "Very High"; note = "Coastal high hazard (wave action)"; }
+  else if (isFloodway) { level = "High"; note = "Regulatory floodway (within SFHA)"; }
   else if (["AO","AH","AE","A","A99"].includes(zone) || zone.startsWith("A1") || zone.startsWith("A2") || zone.startsWith("A3")) {
-    level = "High"; note = "Special Flood Hazard Area (1% annual chance)";}
-  else if (zone === "X" && subty.includes("0.2")) {
-    level = "Moderate"; note = "0.2% annual chance flood (X shaded)"; }
+    level = "High"; note = "Special Flood Hazard Area (1% annual chance)"; }
+  else if (isShadedX) {
+    level = "Moderate"; note = "0.2% annual chance flood (Zone X shaded)"; }
   else if (zone === "X") {
-    level = "Low"; note = "Outside SFHA (Zone X)"; }
+    level = "Low"; note = "Outside SFHA (Zone X unshaded)"; }
   else if (zone === "D") {
-    level = "Undetermined"; note = "Flood data is not available for this parcel (Zone D)"; }
+    level = "Undetermined"; note = "Flood data not available (Zone D)"; }
   else {
     level = inSFHA ? "High" : "Low"; note = "See FEMA NFHL details"; }
+
   return { level, zone, sfha: inSFHA, bfe, note };
 }
 
 export default function Home() {
   const [address, setAddress] = useState("1600 Pennsylvania Ave NW, Washington, DC");
+  const [debug, setDebug] = useState(false);
   const [loading, setLoading] = useState<"idle" | "geocode" | "fetch">("idle");
 
   // Flood
@@ -67,6 +77,15 @@ export default function Home() {
 
   const [error, setError] = useState<string | null>(null);
 
+  function parseLatLon(s: string): {lat:number, lon:number} | null {
+    const m = s.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (!m) return null;
+    const lat = Number(m[1]), lon = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat, lon };
+  }
+
   async function onCheck() {
     setError(null);
     setLoading("geocode");
@@ -75,22 +94,32 @@ export default function Home() {
     setLsLevel(null);    setLsText("Geocoding address…");
 
     try {
-      // 1) géocoder
-      const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
-      const gj = await g.json();
-      if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
-      const { lat, lon } = gj as { lat: number; lon: number };
+      // 1) lat,lon direct ?
+      const ll = parseLatLon(address);
+      let lat: number, lon: number;
+
+      if (ll) {
+        lat = ll.lat; lon = ll.lon;
+      } else {
+        // géocoder
+        const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}${debug ? "&debug=1":""}`, { cache: "no-store" });
+        const gj = await g.json();
+        if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
+        lat = gj.lat; lon = gj.lon;
+      }
 
       setLoading("fetch");
       setFloodText("Querying FEMA NFHL…");
       setEqText("Querying USGS (Design Maps)…");
       setLsText("Querying NRI Landslide…");
 
+      const dbg = debug ? "&debug=1" : "";
+
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes] = await Promise.allSettled([
-        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
-        fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}${dbg}`, { cache: "no-store" }),
+        fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}${dbg}`, { cache: "no-store" }),
+        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}${dbg}`, { cache: "no-store" }),
       ]);
 
       // Flood
@@ -114,7 +143,7 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Landslide (NRI) — texte simplifié : "<LEVEL> risk susceptibility — score XX.X — source: tract|county"
+      // Landslide (NRI) — "<LEVEL> risk susceptibility — score XX.X — source: tract|county"
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
 
@@ -155,7 +184,7 @@ export default function Home() {
   const header   = { background: "#0b396b", color: "white", padding: "28px 16px", textAlign: "center" as const };
   const title    = { fontSize: 32, margin: 0 };
   const subtitle = { opacity: 0.9, marginTop: 8 };
-  const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 16, flexWrap: "wrap" as const };
+  const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 16, flexWrap: "wrap" as const, alignItems: "center" };
   const input    = { width: 420, maxWidth: "90vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" };
   const btn      = { padding: "10px 16px", borderRadius: 6, border: "1px solid #0b396b", background: "#114d8a", color: "white", cursor: "pointer" };
   const gridWrap = { background: "#eef2f6", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
@@ -183,24 +212,24 @@ export default function Home() {
   });
 
   const floodCard = floodLevel == null
-    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Flood</h2></div><div style={cardBody}><div style={small}>{floodText}</div></div></section>)
+    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Flood</h2></div><div style={cardBody}><div style={small} aria-live="polite">{floodText}</div></div></section>)
     : (<section style={{ ...card, border: `1px solid ${PALETTE[floodLevel].border}` }}>
         <div style={coloredHeader(floodLevel)}><h2 style={{ ...h2, margin: 0 }}>Flood</h2><div style={{ marginTop: 6 }}><span style={badge(floodLevel)}>{floodLevel === "Undetermined" ? "UNDETERMINED" : `${floodLevel.toUpperCase()} RISK`}</span></div></div>
-        <div style={cardBody}><div style={small}>{floodText}</div></div>
+        <div style={cardBody}><div style={small} aria-live="polite">{floodText}</div></div>
       </section>);
 
   const eqCard = eqLevel == null
-    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Earthquake</h2></div><div style={cardBody}><div style={small}>{eqText}</div></div></section>)
+    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Earthquake</h2></div><div style={cardBody}><div style={small} aria-live="polite">{eqText}</div></div></section>)
     : (<section style={{ ...card, border: `1px solid ${PALETTE[eqLevel].border}` }}>
         <div style={coloredHeader(eqLevel)}><h2 style={{ ...h2, margin: 0 }}>Earthquake</h2><div style={{ marginTop: 6 }}><span style={badge(eqLevel)}>{`${eqLevel.toUpperCase()} RISK`}</span></div></div>
-        <div style={cardBody}><div style={small}>{eqText}</div></div>
+        <div style={cardBody}><div style={small} aria-live="polite">{eqText}</div></div>
       </section>);
 
   const lsCard = lsLevel == null
-    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Landslide</h2></div><div style={cardBody}><div style={small}>{lsText}</div></div></section>)
+    ? (<section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Landslide</h2></div><div style={cardBody}><div style={small} aria-live="polite">{lsText}</div></div></section>)
     : (<section style={{ ...card, border: `1px solid ${PALETTE[lsLevel].border}` }}>
         <div style={coloredHeader(lsLevel)}><h2 style={{ ...h2, margin: 0 }}>Landslide</h2><div style={{ marginTop: 6 }}><span style={badge(lsLevel)}>{`${lsLevel.toUpperCase()} RISK`}</span></div></div>
-        <div style={cardBody}><div style={small}>{lsText}</div></div>
+        <div style={cardBody}><div style={small} aria-live="polite">{lsText}</div></div>
       </section>);
 
   return (
@@ -209,10 +238,20 @@ export default function Home() {
         <h1 style={title}>Hydrau Risk Checker</h1>
         <div style={subtitle}>Enter your address to check your risks</div>
         <div style={bar}>
-          <input style={input} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="123 Main St, City, State" />
+          <input
+            style={input}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="123 Main St, City, ST 12345 — or paste lat,lon"
+            onKeyDown={(e) => { if (e.key === "Enter" && loading === "idle") onCheck(); }}
+          />
           <button style={btn} onClick={onCheck} disabled={loading !== "idle"}>
             {loading === "idle" ? "Check" : loading === "geocode" ? "Geocoding…" : "Checking…"}
           </button>
+          <label style={{ display:"flex", alignItems:"center", gap:6, color:"#fff" }}>
+            <input type="checkbox" checked={debug} onChange={(e)=>setDebug(e.target.checked)} />
+            Debug
+          </label>
         </div>
       </header>
 
