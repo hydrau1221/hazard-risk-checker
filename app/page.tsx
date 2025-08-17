@@ -66,6 +66,18 @@ async function safeJson(r: Response) {
   try { return await r.json(); } catch { const t = await r.text(); return { __nonjson: true, text: t }; }
 }
 
+// -------- Helper NRI (formatage de texte uniforme) --------
+function formatNri(lvl: RiskLevel, score: any, tractId?: string | null) {
+  if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
+  const word = `${String(lvl).toLowerCase()} risk`;
+  const levelWord = word.charAt(0).toUpperCase() + word.slice(1); // "Low risk"
+  const parts: string[] = [`${levelWord} susceptibility`];
+  const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
+  if (s !== null) parts.push(`score ${s}`);
+  if (tractId) parts.push(`tract ${tractId}`);
+  return parts.join(" — ");
+}
+
 export default function Home() {
   const [address, setAddress] = useState("1600 Pennsylvania Ave NW, Washington, DC");
   const [loading, setLoading] = useState<"idle" | "geocode" | "fetch">("idle");
@@ -141,11 +153,8 @@ export default function Home() {
         const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
         const gj = await g.json();
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
-        const { lat: glat, lon: glon } = gj;
-        if (typeof glat !== "number" || typeof glon !== "number") throw new Error("Invalid coordinates.");
-        const precision = gj?.precision;
-        if (precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
-        lat = glat; lon = glon;
+        lat = gj.lat; lon = gj.lon;
+        if (gj?.precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
       }
 
       setLoading("fetch");
@@ -170,7 +179,7 @@ export default function Home() {
         fetch(`/api/tornado/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
-      // Flood (texte sans répéter le niveau)
+      // Flood (texte SANS le prefixe du niveau)
       if (femaRes.status === "fulfilled") {
         const r = femaRes.value; const j = await r.json();
         if (r.ok) {
@@ -182,7 +191,7 @@ export default function Home() {
         } else { setFloodLevel(null); setFloodText(j?.error || "FEMA query failed."); }
       } else { setFloodLevel(null); setFloodText("FEMA fetch failed."); }
 
-      // Earthquake
+      // Earthquake (texte SANS le prefixe du niveau)
       if (eqRes.status === "fulfilled") {
         const r = eqRes.value; const j = await r.json();
         if (r.ok) {
@@ -190,18 +199,6 @@ export default function Home() {
           setEqText(`SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`);
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
-
-      // -------- Helper NRI --------
-      const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
-        if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
-        const word = `${String(lvl).toLowerCase()} risk`;
-        const levelWord = word.charAt(0).toUpperCase() + word.slice(1); // "Low risk"
-        const parts: string[] = [`${levelWord} susceptibility`];
-        const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
-        if (s !== null) parts.push(`score ${s}`);
-        if (tractId) parts.push(`tract ${tractId}`);
-        return parts.join(" — ");
-      };
 
       // Landslide (NRI)
       if (lsRes.status === "fulfilled") {
@@ -243,7 +240,7 @@ export default function Home() {
         } else { setColdLevel(null); setColdText(j?.error || "NRI cold wave query failed."); }
       } else { setColdLevel(null); setColdText("NRI cold wave fetch failed."); }
 
-      // Hurricane (NRI ou autre)
+      // Hurricane (selon ta route)
       if (hurrRes.status === "fulfilled") {
         const r = hurrRes.value; const j = await r.json();
         if (r.ok) {
@@ -293,7 +290,7 @@ export default function Home() {
   const tagline  = { opacity: 0.9, marginTop: 10, color: "#e5e7eb" };
   const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 18, flexWrap: "wrap" as const, alignItems: "center" };
 
-  // >>> Input sans icône + padding propre
+  // Input sans icône + padding propre
   const input = {
     width: 560,
     maxWidth: "92vw",
@@ -431,20 +428,20 @@ export default function Home() {
             © {new Date().getFullYear()} Hydrau — Educational project • Privacy-friendly, no tracking.
           </div>
 
-{/* Lien LinkedIn centré (une seule ligne) */}
-<div style={{ marginTop: 10 }} className="social">
-  <a
-    href="https://www.linkedin.com/in/hydrau-830122327/"
-    target="_blank"
-    rel="noopener noreferrer"
-    aria-label="Hydrau on LinkedIn"
-  >
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="currentColor" d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.64c0-1.58-.03-3.62-2.21-3.62-2.22 0-2.56 1.73-2.56 3.52V23h-4V8z"/>
-    </svg>
-    <span>Connect on LinkedIn</span>
-  </a>
-</div>
+          {/* Lien LinkedIn centré (une seule ligne) */}
+          <div style={{ marginTop: 10 }} className="social">
+            <a
+              href="https://www.linkedin.com/in/hydrau-830122327/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Hydrau on LinkedIn"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.64c0-1.58-.03-3.62-2.21-3.62-2.22 0-2.56 1.73-2.56 3.52V23h-4V8z"/>
+              </svg>
+              <span>Connect on LinkedIn</span>
+            </a>
+          </div>
         </div>
       </main>
 
@@ -457,27 +454,27 @@ export default function Home() {
         @media (max-width: 420px) {
           h1 { font-size: 26px !important; }
         }
+        .social { text-align: center; }
+        .social a {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          color: #0a66c2;
+          font-size: 14px;
+          font-weight: 600;
+          text-decoration: none;
+          white-space: nowrap;        /* évite le retour à la ligne */
+        }
+        .social a:hover { text-decoration: underline; }
+        .social a svg {
+          width: 18px;
+          height: 18px;
+          color: #0a66c2;             /* utilise currentColor */
+          display: inline-block;
+          vertical-align: middle;
+          flex: 0 0 18px;
+        }
       `}</style>
     </div>
   );
-}
-.social { text-align: center; }
-.social a {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: #0a66c2;
-  font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;        /* évite le retour à la ligne */
-}
-.social a:hover { text-decoration: underline; }
-.social a svg {
-  width: 18px;
-  height: 18px;
-  color: #0a66c2;             /* utilise currentColor */
-  display: inline-block;      /* évite le saut de ligne */
-  vertical-align: middle;     /* alignement propre */
-  flex: 0 0 18px;
 }
