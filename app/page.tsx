@@ -35,7 +35,6 @@ function classifyFlood(features: Feature[] | null): {
     a.SFHA_TF === true || a.SFHA_TF === "T" || a.SFHA_TF === "Y" ||
     ["A","AE","AO","AH","A1","A2","A3","A99","VE","V","V1"].some(p => zone.startsWith(p));
 
-  // Détections utiles
   const isFloodway = subty.includes("FLOODWAY");
   const isShadedX =
     zone === "X" &&
@@ -74,6 +73,12 @@ export default function Home() {
   // Landslide
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
   const [lsText, setLsText] = useState<string>("Coming soon");
+
+  // Placeholders pour les nouveaux risques (interface seulement)
+  const [hurrText] = useState<string>("Coming soon");
+  const [heatText] = useState<string>("Coming soon");
+  const [coldText] = useState<string>("Coming soon");
+  const [torText]  = useState<string>("Coming soon");
 
   const [error, setError] = useState<string | null>(null);
 
@@ -143,7 +148,7 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // Landslide (NRI) — "<LEVEL> risk susceptibility — score XX.X — source: tract|county"
+      // Landslide
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
 
@@ -188,7 +193,7 @@ export default function Home() {
   const input    = { width: 420, maxWidth: "90vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" };
   const btn      = { padding: "10px 16px", borderRadius: 6, border: "1px solid #0b396b", background: "#114d8a", color: "white", cursor: "pointer" };
   const gridWrap = { background: "#eef2f6", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
-  const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 980, margin: "20px auto" };
+  const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 1100, margin: "20px auto" };
   const card     = { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
   const sectionHeader = { padding: 16, borderBottom: "1px solid #e2e8f0" };
   const h2       = { margin: "0 0 10px 0", fontSize: 22 };
@@ -232,6 +237,18 @@ export default function Home() {
         <div style={cardBody}><div style={small} aria-live="polite">{lsText}</div></div>
       </section>);
 
+  // Cartes placeholders (interface seulement)
+  const placeholderCard = (title: string, text: string) => (
+    <section style={card}>
+      <div style={sectionHeader}>
+        <h2 style={{ ...h2, margin: 0 }}>{title}</h2>
+      </div>
+      <div style={cardBody}>
+        <div style={small}>{text}</div>
+      </div>
+    </section>
+  );
+
   return (
     <div>
       <header style={header}>
@@ -256,14 +273,20 @@ export default function Home() {
       </header>
 
       <main style={gridWrap}>
-        {error && <div style={{ maxWidth: 980, margin: "12px auto 0", background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 6 }}>{error}</div>}
+        {error && <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 6 }}>{error}</div>}
         <div style={grid}>
           {floodCard}
           {eqCard}
           {lsCard}
-          <section style={card}><div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>Wildfire</h2></div><div style={cardBody}><div style={small}>Coming soon</div></div></section>
+          {placeholderCard("Wildfire", "Coming soon")}
+          {placeholderCard("Hurricane", hurrText)}
+          {placeholderCard("Heatwave", heatText)}
+          {placeholderCard("Cold Wave", coldText)}
+          {placeholderCard("Tornado", torText)}
         </div>
-        <div style={foot}>⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide).</div>
+        <div style={foot}>
+          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide).
+        </div>
       </main>
     </div>
   );
