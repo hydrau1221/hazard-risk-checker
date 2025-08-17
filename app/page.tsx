@@ -102,176 +102,157 @@ export default function Home() {
     return { lat, lon };
   }
 
-  async function onCheck() {
-    setError(null);
-    setGeoNote(null);
-    setLoading("geocode");
-    setFloodLevel(null); setFloodText("Geocoding address…");
-    setEqLevel(null);    setEqText("Geocoding address…");
-    setLsLevel(null);    setLsText("Geocoding address…");
-    setHurrLevel(null);  setHurrText("Geocoding address…");
-    setHeatLevel(null);  setHeatText("Geocoding address…");
-    setColdLevel(null);  setColdText("Geocoding address…");
+ async function onCheck() {
+  setError(null);
+  setGeoNote(null);
+  setLoading("geocode");
 
-    try {
-      // 1) lat,lon direct ?
-      const ll = parseLatLon(address);
-      let lat: number, lon: number;
+  // réinitialise les cartes
+  setFloodLevel(null); setFloodText("Geocoding address…");
+  setEqLevel(null);    setEqText("Geocoding address…");
+  setLsLevel(null);    setLsText("Geocoding address…");
+  setHurrLevel(null);  setHurrText("Geocoding address…");
+  setHeatLevel(null);  setHeatText("Geocoding address…");
+  setColdLevel(null);  setColdText("Geocoding address…");
 
-      if (ll) {
-        lat = ll.lat; lon = ll.lon;
+  try {
+    // 1) lat,lon direct ?
+    const ll = parseLatLon(address);
+    let lat: number, lon: number;
+
+    if (ll) {
+      lat = ll.lat; lon = ll.lon;
+    } else {
+      // géocoder
+      const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
+      const gj = await g.json();
+      if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
+      lat = gj.lat; lon = gj.lon;
+
+      // note "city centroid" si applicable
+      const isCityCentroid = (gj && (gj.precision === "city" || gj.mode === "city"));
+      if (isCityCentroid) {
+        const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
+        setGeoNote(`Exact address not found. Using city centroid${label ? `: ${label}` : ""}. Results are generalized.`);
       } else {
-        // géocoder
-        const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
-        const gj = await g.json();
-        if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
-        lat = gj.lat; lon = gj.lon;
-
-        // Si on a un centroïde de ville, on affiche la note explicite
-        const isCityCentroid = (gj && (gj.precision === "city" || gj.mode === "city"));
-        if (isCityCentroid) {
-          const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
-          setGeoNote(`Exact address not found. Using city centroid${label ? `: ${label}` : ""}. Results are generalized.`);
-        } else {
-          setGeoNote(null);
-        }
+        setGeoNote(null);
       }
-
-      setLoading("fetch");
-      setFloodText("Querying FEMA NFHL…");
-      setEqText("Querying USGS (Design Maps)…");
-      setLsText("Querying NRI Landslide…");
-      setHurrText("Querying NRI Hurricane…");
-      setHeatText("Querying NRI Heatwave…");
-      setColdText("Querying NRI Cold Wave…");
-
-      // 2) requêtes parallèles
-      const [femaRes, eqRes, lsRes, hurrRes, heatRes] = await Promise.allSettled([
-        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-        fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-      ]);
-
-      // Flood
-      if (femaRes.status === "fulfilled") {
-        const r = femaRes.value; const j = await r.json();
-        if (r.ok) {
-          const res = classifyFlood(j.features ?? []);
-          let line = `${res.level === "Undetermined" ? "UNDETERMINED" : `${res.level.toUpperCase()} RISK`} — Zone ${res.zone}`;
-          if (res.bfe) line += ` | BFE/Depth: ${res.bfe} ft`;
-          line += ` | ${res.note}`;
-          setFloodLevel(res.level); setFloodText(line);
-        } else { setFloodLevel(null); setFloodText(j?.error || "FEMA query failed."); }
-      } else { setFloodLevel(null); setFloodText("FEMA fetch failed."); }
-
-      // Earthquake
-      if (eqRes.status === "fulfilled") {
-        const r = eqRes.value; const j = await r.json();
-        if (r.ok) {
-          setEqLevel(j.level as RiskLevel);
-          setEqText(`${(j.level as string).toUpperCase()} RISK — SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`);
-        } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
-      } else { setEqLevel(null); setEqText("USGS fetch failed."); }
-
-      // Landslide
-      if (lsRes.status === "fulfilled") {
-        const r = lsRes.value; const j = await r.json();
-        if (r.ok) {
-          const lvl = (j.level as RiskLevel) ?? "Undetermined";
-          setLsLevel(lvl);
-          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head =
-            (lvl === "Undetermined") ? "UNDETERMINED" :
-            (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-            `${String(lvl).toUpperCase()} RISK`;
-          const scorePart = s !== null ? ` — score ${s}` : "";
-          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-          setLsText(`${head} susceptibility${scorePart}${srcPart}`);
-        } else {
-          setLsLevel(null); setLsText(j?.error || "NRI landslide query failed.");
-        }
-      } else {
-        setLsLevel(null); setLsText("NRI landslide fetch failed.");
-      }
-
-      // Hurricane (NRI)
-      if (hurrRes.status === "fulfilled") {
-        const r = hurrRes.value; const j = await r.json();
-        if (r.ok) {
-          const lvl = (j.level as RiskLevel) ?? "Undetermined";
-          setHurrLevel(lvl);
-          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head =
-            (lvl === "Undetermined") ? "UNDETERMINED" :
-            (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-            `${String(lvl).toUpperCase()} RISK`;
-          const scorePart = s !== null ? ` — score ${s}` : "";
-          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-          setHurrText(`${head}${scorePart}${srcPart}`);
-        } else {
-          setHurrLevel(null); setHurrText(j?.error || "NRI hurricane query failed.");
-        }
-      } else {
-        setHurrLevel(null); setHurrText("NRI hurricane fetch failed.");
-      }
-
-// Heatwave (NRI)
-if (heatRes.status === "fulfilled") {
-  const r = heatRes.value; const j = await r.json();
-  if (r.ok) {
-    const lvl = (j.level as RiskLevel) ?? "Undetermined";
-    setHeatLevel(lvl);
-    const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-    const head =
-      (lvl === "Undetermined") ? "UNDETERMINED" :
-      (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-      `${String(lvl).toUpperCase()} RISK`;
-    const scorePart = s !== null ? ` — score ${s}` : "";
-    const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-    setHeatText(`${head}${scorePart}${srcPart}`);
-  } else {
-    // ❗ active quand même la carte avec badge UNDETERMINED
-    setHeatLevel("Undetermined");
-    setHeatText(j?.error || "NRI heatwave query failed.");
-  }
-} else {
-  // ❗ active quand même la carte avec badge UNDETERMINED
-  setHeatLevel("Undetermined");
-  setHeatText("NRI heatwave fetch failed.");
-}
-
-    } catch (e: any) {
-      setError(e.message || String(e));
-    } finally {
-      setLoading("idle");
     }
+
+    // 2) requêtes parallèles
+    setLoading("fetch");
+    setFloodText("Querying FEMA NFHL…");
+    setEqText("Querying USGS (Design Maps)…");
+    setLsText("Querying NRI Landslide…");
+    setHurrText("Querying NRI Hurricane…");
+    setHeatText("Querying NRI Heatwave…");
+    setColdText("Querying NRI Cold Wave…");
+
+    const [femaRes, eqRes, lsRes, hurrRes, heatRes, coldRes] = await Promise.allSettled([
+      fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
+      fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+      fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+      fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+      fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+      fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+    ]);
+
+    // Flood
+    if (femaRes.status === "fulfilled") {
+      const r = femaRes.value; const j = await r.json();
+      if (r.ok) {
+        const res = classifyFlood(j.features ?? []);
+        let line = `${res.level === "Undetermined" ? "UNDETERMINED" : `${res.level.toUpperCase()} RISK`} — Zone ${res.zone}`;
+        if (res.bfe) line += ` | BFE/Depth: ${res.bfe} ft`;
+        line += ` | ${res.note}`;
+        setFloodLevel(res.level); setFloodText(line);
+      } else { setFloodLevel("Undetermined"); setFloodText(j?.error || "FEMA query failed."); }
+    } else { setFloodLevel("Undetermined"); setFloodText("FEMA fetch failed."); }
+
+    // Earthquake
+    if (eqRes.status === "fulfilled") {
+      const r = eqRes.value; const j = await r.json();
+      if (r.ok) {
+        setEqLevel(j.level as RiskLevel);
+        setEqText(`${(j.level as string).toUpperCase()} RISK — SDC ${j.sdc} (ASCE ${j.edition}, Site ${j.siteClass})`);
+      } else { setEqLevel("Undetermined"); setEqText(j?.error || "USGS query failed."); }
+    } else { setEqLevel("Undetermined"); setEqText("USGS fetch failed."); }
+
+    // Landslide
+    if (lsRes.status === "fulfilled") {
+      const r = lsRes.value; const j = await r.json();
+      if (r.ok) {
+        const lvl = (j.level as RiskLevel) ?? "Undetermined";
+        setLsLevel(lvl);
+        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                     `${String(lvl).toUpperCase()} RISK`;
+        const scorePart = s !== null ? ` — score ${s}` : "";
+        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+        setLsText(`${head} susceptibility${scorePart}${srcPart}`);
+      } else { setLsLevel("Undetermined"); setLsText(j?.error || "NRI landslide query failed."); }
+    } else { setLsLevel("Undetermined"); setLsText("NRI landslide fetch failed."); }
+
+    // Hurricane (NRI)
+    if (hurrRes.status === "fulfilled") {
+      const r = hurrRes.value; const j = await r.json();
+      if (r.ok) {
+        const lvl = (j.level as RiskLevel) ?? "Undetermined";
+        setHurrLevel(lvl);
+        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                     `${String(lvl).toUpperCase()} RISK`;
+        const scorePart = s !== null ? ` — score ${s}` : "";
+        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+        setHurrText(`${head}${scorePart}${srcPart}`);
+      } else { setHurrLevel("Undetermined"); setHurrText(j?.error || "NRI hurricane query failed."); }
+    } else { setHurrLevel("Undetermined"); setHurrText("NRI hurricane fetch failed."); }
+
+    // Heatwave (NRI)
+    if (heatRes.status === "fulfilled") {
+      const r = heatRes.value; const j = await r.json();
+      if (r.ok) {
+        const lvl = (j.level as RiskLevel) ?? "Undetermined";
+        setHeatLevel(lvl);
+        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                     `${String(lvl).toUpperCase()} RISK`;
+        const scorePart = s !== null ? ` — score ${s}` : "";
+        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+        setHeatText(`${head}${scorePart}${srcPart}`);
+      } else { setHeatLevel("Undetermined"); setHeatText(j?.error || "NRI heatwave query failed."); }
+    } else { setHeatLevel("Undetermined"); setHeatText("NRI heatwave fetch failed."); }
+
+    // Cold Wave (NRI)  ← CE BLOC DOIT RESTER DANS onCheck()
+    if (coldRes.status === "fulfilled") {
+      const r = coldRes.value; const j = await r.json();
+      if (r.ok) {
+        const lvl = (j.level as RiskLevel) ?? "Undetermined";
+        setColdLevel(lvl);
+        const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+        const head = (lvl === "Undetermined") ? "UNDETERMINED" :
+                     (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+                     `${String(lvl).toUpperCase()} RISK`;
+        const scorePart = s !== null ? ` — score ${s}` : "";
+        const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+        setColdText(`${head}${scorePart}${srcPart}`);
+      } else {
+        setColdLevel("Undetermined");
+        setColdText(j?.error || "NRI cold wave query failed.");
+      }
+    } else {
+      setColdLevel("Undetermined");
+      setColdText("NRI cold wave fetch failed.");
+    }
+
+  } catch (e: any) {
+    setError(e.message || String(e));
+  } finally {
+    setLoading("idle");
   }
-  
-// Cold Wave (NRI)
-if (coldRes.status === "fulfilled") {
-  const r = coldRes.value; const j = await r.json();
-  if (r.ok) {
-    const lvl = (j.level as RiskLevel) ?? "Undetermined";
-    setColdLevel(lvl);
-    const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-    const head =
-      (lvl === "Undetermined") ? "UNDETERMINED" :
-      (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-      `${String(lvl).toUpperCase()} RISK`;
-    const scorePart = s !== null ? ` — score ${s}` : "";
-    const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-    setColdText(`${head}${scorePart}${srcPart}`);
-  } else {
-    // active quand même la carte avec badge UNDETERMINED
-    setColdLevel("Undetermined");
-    setColdText(j?.error || "NRI cold wave query failed.");
-  }
-} else {
-  setColdLevel("Undetermined");
-  setColdText("NRI cold wave fetch failed.");
 }
 
   // ---------- styles ----------
