@@ -79,7 +79,8 @@ function formatNri(lvl: RiskLevel, score: any, tractId?: string | null) {
 }
 
 export default function Home() {
-  const [address, setAddress] = useState("1600 Pennsylvania Ave NW, Washington, DC");
+  // Adresse vide au chargement (on utilise un placeholder)
+  const [address, setAddress] = useState("");
   const [loading, setLoading] = useState<"idle" | "geocode" | "fetch">("idle");
 
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +128,11 @@ export default function Home() {
   }
 
   async function onCheck() {
+    if (!address.trim()) {
+      setError("Please enter an address.");
+      return;
+    }
+
     setError(null);
     setGeoNote(null);
     setLoading("geocode");
@@ -386,7 +392,7 @@ export default function Home() {
             style={input}
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="123 Main St, City, ST 12345"
+            placeholder="e.g. 1600 Pennsylvania Ave NW, Washington, DC"
             onKeyDown={(e) => { if (e.key === "Enter" && loading === "idle") onCheck(); }}
             aria-label="Address input"
           />
@@ -439,7 +445,7 @@ export default function Home() {
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="currentColor" d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5zM.5 8h4V23h-4V8zm7.5 0h3.8v2.05h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V23h-4v-6.64c0-1.58-.03-3.62-2.21-3.62-2.22 0-2.56 1.73-2.56 3.52V23h-4V8z"/>
               </svg>
-              <span>Find me on LinkedIn</span>
+              <span>Connect with me on LinkedIn</span>
             </a>
           </div>
         </div>
@@ -451,6 +457,7 @@ export default function Home() {
         .cta:hover:not([disabled]) { transform: translateY(-1px); }
         .cta:active:not([disabled]) { transform: translateY(0); }
         input:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.35); border-color: #60a5fa !important; }
+        input::placeholder { color: #94a3b8; opacity: 1; } /* placeholder gris clair */
         @media (max-width: 420px) {
           h1 { font-size: 26px !important; }
         }
@@ -463,13 +470,13 @@ export default function Home() {
           font-size: 14px;
           font-weight: 600;
           text-decoration: none;
-          white-space: nowrap;        /* évite le retour à la ligne */
+          white-space: nowrap;
         }
         .social a:hover { text-decoration: underline; }
         .social a svg {
           width: 18px;
           height: 18px;
-          color: #0a66c2;             /* utilise currentColor */
+          color: #0a66c2;
           display: inline-block;
           vertical-align: middle;
           flex: 0 0 18px;
