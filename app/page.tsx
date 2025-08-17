@@ -334,7 +334,7 @@ export default function Home() {
   const floodCard = makeCard("Flood",       floodLevel, floodText, "risk");
   const eqCard    = makeCard("Earthquake",  eqLevel,    eqText,    "risk");
   const lsCard    = makeCard("Landslide",   lsLevel,    lsText,    "risk");
-  const wfCard    = makeCard("Wildfire",    wfLevel,    wfText,    "level"); // <-- niveau seul
+  const wfCard    = makeCard("Wildfire",    wfLevel,    wfText,    "risk");
   const heatCard  = makeCard("Heatwave",    heatLevel,  heatText,  "risk");
   const coldCard  = makeCard("Cold Wave",   coldLevel,  coldText,  "risk");
   const hurrCard  = makeCard("Hurricane",   hurrLevel,  hurrText,  "risk");
