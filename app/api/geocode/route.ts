@@ -9,12 +9,12 @@ function ok(lat: number, lon: number, meta: Record<string, any> = {}) {
 
 const NOMINATIM_UA =
   process.env.NOMINATIM_UA ||
-  "HydrauRiskChecker/1.0 (contact@example.com)"; // ⚠️ mets ton email/domaine
+  "HydrauRiskChecker/1.0 (contact@example.com)"; // ← mets ton email/domaine
 
 type Parsed = { street: string; city?: string; state?: string; zip?: string };
 
+/** Parse "195 Center St, Marysvale, UT 84750" (zip optionnel) */
 function parseUS(addr: string): Parsed | null {
-  // "195 Center St, Marysvale, UT 84750" ou sans ZIP
   const rx = /^\s*(.+?)\s*,\s*([A-Za-z .'-]+?)\s*,\s*([A-Z]{2})(?:\s+(\d{5})(?:-\d{4})?)?\s*$/;
   const m = addr.match(rx);
   if (m) return { street: m[1].trim(), city: m[2].trim(), state: m[3], zip: m[4] };
@@ -24,7 +24,7 @@ function parseUS(addr: string): Parsed | null {
   return null;
 }
 
-// ---------- Census: structured (adresse)
+/** Census (structured) — adresse stricte */
 async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
   const params = new URLSearchParams({
     street: p.street,
@@ -37,7 +37,7 @@ async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
 
   const url = `https://geocoding.geo.census.gov/geocoder/locations/address?${params.toString()}`;
   const r = await fetch(url, { cache: "no-store" });
-  const j: any = await r.json();
+  const j: any = await r.json().catch(() => null);
   const matches = j?.result?.addressMatches ?? [];
   attempts.push({ engine: "census-structured", benchmark, url, status: r.status, count: matches.length });
   if (r.ok && matches.length > 0) {
@@ -49,7 +49,7 @@ async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
         matched: m?.matchedAddress ?? null,
         source: "census",
         benchmark,
-        mode: "structured",
+        mode: "address",
         precision: "address",
       });
     }
@@ -57,13 +57,12 @@ async function censusStructured(p: Parsed, benchmark: string, attempts: any[]) {
   return null;
 }
 
-// ---------- Census: oneline fallback (un peu plus permissif)
+/** Census (oneline) — un peu plus permissif, toujours “adresse” si trouvé */
 async function censusOneLine(address: string, benchmark: string, attempts: any[]) {
   const params = new URLSearchParams({ address, format: "json", benchmark });
   const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?${params.toString()}`;
   const r = await fetch(url, { cache: "no-store" });
-  let j: any = null;
-  try { j = await r.json(); } catch {}
+  const j: any = await r.json().catch(() => null);
   const matches = j?.result?.addressMatches ?? [];
   attempts.push({ engine: "census-oneline", benchmark, url, status: r.status, count: matches.length });
   if (r.ok && matches.length > 0) {
@@ -75,7 +74,7 @@ async function censusOneLine(address: string, benchmark: string, attempts: any[]
         matched: m?.matchedAddress ?? null,
         source: "census",
         benchmark,
-        mode: "oneline",
+        mode: "address",
         precision: "address",
       });
     }
@@ -83,12 +82,11 @@ async function censusOneLine(address: string, benchmark: string, attempts: any[]
   return null;
 }
 
-// ---------- OSM (Nominatim) – adresse
+/** Nominatim — adresse libre */
 async function osmAddress(addr: string, attempts: any[]) {
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(addr)}`;
   const r = await fetch(url, { cache: "no-store", headers: { "User-Agent": NOMINATIM_UA } });
-  let arr: any[] = [];
-  try { arr = await r.json(); } catch {}
+  const arr: any[] = await r.json().catch(() => []) as any[];
   attempts.push({ engine: "nominatim-address", url, status: r.status, count: Array.isArray(arr) ? arr.length : 0 });
   if (r.ok && Array.isArray(arr) && arr.length > 0) {
     const it = arr[0];
@@ -105,7 +103,7 @@ async function osmAddress(addr: string, attempts: any[]) {
   return null;
 }
 
-// ---------- ✅ OSM (Nominatim) – fallback "ville" (centroïde)
+/** ✅ Nominatim — fallback centroïde de ville */
 async function osmCity(p: Parsed, attempts: any[]) {
   if (!p.city || !p.state) return null;
   const params = new URLSearchParams({
@@ -116,17 +114,16 @@ async function osmCity(p: Parsed, attempts: any[]) {
     limit: "1",
   });
   if (p.zip) params.set("postalcode", p.zip);
+
   const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
   const r = await fetch(url, { cache: "no-store", headers: { "User-Agent": NOMINATIM_UA } });
-  let arr: any[] = [];
-  try { arr = await r.json(); } catch {}
+  const arr: any[] = await r.json().catch(() => []) as any[];
   attempts.push({ engine: "nominatim-city", url, status: r.status, count: Array.isArray(arr) ? arr.length : 0 });
 
   if (r.ok && Array.isArray(arr) && arr.length > 0) {
     const it = arr[0];
     const lat = Number(it.lat), lon = Number(it.lon);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      // petit label sympa pour l'UI si tu veux l'afficher
       const place = [p.city, p.state, p.zip].filter(Boolean).join(", ");
       return ok(lat, lon, {
         display_name: it.display_name ?? null,
@@ -134,6 +131,7 @@ async function osmCity(p: Parsed, attempts: any[]) {
         source: "nominatim",
         mode: "city",
         precision: "city",
+        reason: "exact-address-not-found",
       });
     }
   }
@@ -149,33 +147,33 @@ export async function GET(req: NextRequest) {
   const attempts: any[] = [];
   const parsed = parseUS(address);
 
-  // 1) Census structured (2020 puis Current) — avec et sans ZIP
+  // 1) Census structured (2020 puis Current) — avec/sans ZIP
   if (parsed) {
     for (const bench of ["Public_AR_Census2020", "Public_AR_Current"]) {
-      const res1 = await censusStructured(parsed, bench, attempts);
-      if (res1) { const j = await res1.json(); if (debug) j.attempts = attempts; return Response.json(j); }
+      const r1 = await censusStructured(parsed, bench, attempts);
+      if (r1) { const j = await r1.json(); if (debug) j.attempts = attempts; return Response.json(j); }
       if (parsed.zip) {
         const { zip, ...noZip } = parsed;
-        const res2 = await censusStructured(noZip, bench, attempts);
-        if (res2) { const j2 = await res2.json(); if (debug) j2.attempts = attempts; return Response.json(j2); }
+        const r2 = await censusStructured(noZip, bench, attempts);
+        if (r2) { const j2 = await r2.json(); if (debug) j2.attempts = attempts; return Response.json(j2); }
       }
     }
   }
 
-  // 2) Census oneline (permissif)
+  // 2) Census one-line
   for (const bench of ["Public_AR_Census2020", "Public_AR_Current"]) {
-    const res3 = await censusOneLine(address, bench, attempts);
-    if (res3) { const j3 = await res3.json(); if (debug) j3.attempts = attempts; return Response.json(j3); }
+    const r3 = await censusOneLine(address, bench, attempts);
+    if (r3) { const j3 = await r3.json(); if (debug) j3.attempts = attempts; return Response.json(j3); }
   }
 
-  // 3) Nominatim (adresse complète)
-  const resO = await osmAddress(address, attempts);
-  if (resO) { const j = await resO.json(); if (debug) j.attempts = attempts; return Response.json(j); }
+  // 3) Nominatim adresse
+  const rO = await osmAddress(address, attempts);
+  if (rO) { const j = await rO.json(); if (debug) j.attempts = attempts; return Response.json(j); }
 
-  // 4) ✅ Fallback "ville" (centroïde de la ville)
+  // 4) ✅ Fallback centroïde de ville (avec precision="city")
   if (parsed) {
-    const resCity = await osmCity(parsed, attempts);
-    if (resCity) { const j = await resCity.json(); if (debug) j.attempts = attempts; return Response.json(j); }
+    const rCity = await osmCity(parsed, attempts);
+    if (rCity) { const jc = await rCity.json(); if (debug) jc.attempts = attempts; return Response.json(jc); }
   }
 
   // 5) Rien
