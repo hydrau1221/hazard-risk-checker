@@ -195,7 +195,7 @@ export default function Home() {
         if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
         const levelWord = `${String(lvl).toLowerCase()} risk`;
         const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
-        const parts: string[] = [levelWord, "susceptibility"];
+        const parts: string[] = [`${levelWord} susceptibility`];
         if (s !== null) parts.push(`score ${s}`);
         if (tractId) parts.push(`tract ${tractId}`);
         return parts.join(" — ");
