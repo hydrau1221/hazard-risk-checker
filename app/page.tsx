@@ -287,8 +287,8 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
   const gridWrap = { background: "#e0e0e0", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
   const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 1100, margin: "20px auto" };
   const card     = { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
-  const sectionHeader = { padding: 16, borderBottom: "1px solid #e2e8f0" };
-  const h2       = { margin: "0 0 10px 0", fontSize: 22 };
+const sectionHeader = { padding: 16, borderBottom: "1px solid #e2e8f0", color: "#111827" };
+const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
   const cardBody = { padding: 24 };
   const small    = { fontSize: 14, color: "#334155" };
   const foot     = { fontSize: 12, opacity: 0.7, textAlign: "center" as const, marginTop: 8, color: "#374151" };
