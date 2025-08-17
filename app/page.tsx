@@ -358,7 +358,7 @@ const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
             {loading === "idle" ? "Check" : loading === "geocode" ? "Geocoding…" : "Checking…"}
           </button>
         </div>
-        <div style={hint}>street, city or county — US only</div>
+        <div style={hint}>Your street, city or county (US only)</div>
       </header>
 
       <main style={gridWrap}>
