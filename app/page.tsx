@@ -122,11 +122,19 @@ export default function Home() {
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
         lat = gj.lat; lon = gj.lon;
 
-        // Si le géocode a renvoyé un centroïde de ville, on l’indique à l’utilisateur
-        if (gj?.precision === "city") {
-          setGeoNote(`Exact address not found. Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""});
-        } else {
-          setGeoNote(null);
+// Si le géocode est retombé sur un centroïde de ville,
+// on affiche une note explicite pour l’utilisateur.
+const isCityCentroid =
+  (gj && (gj.precision === "city" || gj.mode === "city"));
+
+if (isCityCentroid) {
+  const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
+  setGeoNote(
+    `Exact address not found. Using city centroid${label ? `: ${label}` : ""}`
+  );
+} else {
+  setGeoNote(null);
+}
         }
       }
 
