@@ -87,6 +87,9 @@ export default function Home() {
 
   const [error, setError] = useState<string | null>(null);
 
+  // Note affichée quand le géocode tombe sur un centroïde de ville
+  const [geoNote, setGeoNote] = useState<string | null>(null);
+
   function parseLatLon(s: string): {lat:number, lon:number} | null {
     const m = s.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
     if (!m) return null;
@@ -98,6 +101,7 @@ export default function Home() {
 
   async function onCheck() {
     setError(null);
+    setGeoNote(null);
     setLoading("geocode");
     setFloodLevel(null); setFloodText("Geocoding address…");
     setEqLevel(null);    setEqText("Geocoding address…");
@@ -112,10 +116,18 @@ export default function Home() {
       if (ll) {
         lat = ll.lat; lon = ll.lon;
       } else {
+        // géocoder
         const g = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`, { cache: "no-store" });
         const gj = await g.json();
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
         lat = gj.lat; lon = gj.lon;
+
+        // Si le géocode a renvoyé un centroïde de ville, on l’indique à l’utilisateur
+        if (gj?.precision === "city") {
+          setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
+        } else {
+          setGeoNote(null);
+        }
       }
 
       setLoading("fetch");
@@ -304,6 +316,13 @@ export default function Home() {
 
       <main style={gridWrap}>
         {error && <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 6 }}>{error}</div>}
+
+        {geoNote && (
+          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fef3c7", border: "1px solid #fde68a", color: "#78350f", padding: 10, borderRadius: 6 }}>
+            {geoNote}
+          </div>
+        )}
+
         <div style={grid}>
           {floodCard}
           {eqCard}
