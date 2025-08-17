@@ -64,18 +64,18 @@ async function fetchWithTimeout(url: string, ms: number) {
 async function tryVariants(baseUrl: string, lat: number, lon: number, mode: "fast"|"deep") {
   const TIMEOUT_MS = Number(process.env.WFR_TIMEOUT_MS || (mode === "deep" ? "2000" : "1500"));
 
-  const RULES = mode === "deep"
-    ? [
-        { label: "RPS_Class",        rule: { rasterFunction: "RPS_Class" },        bands: [undefined, 0, 1, 2, 3] },
-        { label: "ClassRPS",         rule: { rasterFunction: "ClassRPS" },         bands: [undefined, 0, 1, 2, 3] },
-        { label: "ClassifiedRPS",    rule: { rasterFunction: "ClassifiedRPS" },    bands: [undefined, 0, 1, 2, 3] },
-        { label: "RPS",              rule: { rasterFunction: "RPS" },              bands: [undefined, 0, 1, 2, 3] },
-        { label: "none",             rule: undefined,                               bands: [undefined, 0, 1, 2, 3] },
-      ]
-    : [
-        { label: "RPS_Class",        rule: { rasterFunction: "RPS_Class" },        bands: [undefined] },
-        { label: "RPS",              rule: { rasterFunction: "RPS" },              bands: [undefined] },
-      ];
+const RULES = mode === "deep"
+  ? [
+      { label: "RPS",       rule: { rasterFunction: "RPS"       }, bands: [undefined, 0, 1, 2, 3] },
+      { label: "RPS_Class", rule: { rasterFunction: "RPS_Class" }, bands: [undefined, 0, 1, 2, 3] },
+      { label: "ClassRPS",  rule: { rasterFunction: "ClassRPS"  }, bands: [undefined, 0, 1, 2, 3] },
+      { label: "ClassifiedRPS", rule: { rasterFunction: "ClassifiedRPS" }, bands: [undefined, 0, 1, 2, 3] },
+      { label: "none",      rule: undefined,                     bands: [undefined, 0, 1, 2, 3] },
+    ]
+  : [
+      { label: "RPS",       rule: { rasterFunction: "RPS"       }, bands: [undefined] },
+      { label: "RPS_Class", rule: { rasterFunction: "RPS_Class" }, bands: [undefined] },
+    ];
 
   for (const rr of RULES) {
     for (const band of (rr.bands || [undefined])) {
