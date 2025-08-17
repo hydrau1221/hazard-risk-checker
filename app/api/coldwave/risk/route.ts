@@ -14,7 +14,7 @@ const NRI_COUNTIES =
 
 type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined";
 
-/** Mappe le libellé NRI (RISKR) → nos 5 niveaux (pas de calcul depuis le score). */
+/** Mappe le libellé NRI (RISKR) → nos 5 niveaux. */
 function mapLabelToFive(raw: unknown): Five {
   if (raw == null) return "Undetermined";
   const s = String(raw).toLowerCase().replace(/[\s_\-()/]+/g, "");
@@ -28,7 +28,7 @@ function mapLabelToFive(raw: unknown): Five {
   return "Undetermined";
 }
 
-/** Cherche un attribut (gère les préfixes ex. NRI_CensusTracts_COLD_RISKR). */
+/** Cherche un attribut (gère les préfixes ex. NRI_CensusTracts_CWAV_RISKR). */
 function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   for (const k of Object.keys(attrs)) {
     const up = k.toUpperCase();
@@ -37,26 +37,26 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   return null;
 }
 
-/** 🔒 Lecture stricte des champs COLD WAVE :
- *  - Catégorie officielle: ...COLD_RISKR  (texte "Relatively ...")
- *  - Score Cold Wave:      ...COLD_RISKS  (0–100)  (PAS percentile/rank/index)
+/** Lecture stricte des champs COLD WAVE (code NRI = CWAV) :
+ *  - Catégorie officielle: ...CWAV_RISKR  (texte "Relatively ...")
+ *  - Score Cold Wave:      ...CWAV_RISKS  (0–100)
  */
 function extractCold(attrs: Record<string, any>) {
   // label (catégorie officielle)
   const riskR = findAttr(attrs, [
-    /(^|_)COLD_RISKR$/i,          // exact "COLD_RISKR" (avec éventuel préfixe)
-    /(^|_)(COLD).*_RISKR$/i,      // fallback: contient COLD + _RISKR
+    /(^|_)CWAV_RISKR$/i,        // exact "CWAV_RISKR" (avec éventuel préfixe)
+    /(^|_)(CWAV).*_RISKR$/i,    // fallback: contient CWAV + _RISKR
   ]);
 
-  // score (toujours ...COLD_RISKS)
-  let riskS = findAttr(attrs, [/^(.+_)?COLD_RISKS$/i]);
+  // score (toujours ...CWAV_RISKS)
+  let riskS = findAttr(attrs, [/^(.+_)?CWAV_RISKS$/i]);
 
   if (!riskS) {
-    // fallback prudent : contient COLD et finit par RISKS, sans RISKR/RANK/PCTL/INDEX
+    // fallback prudent : contient CWAV et finit par RISKS, sans RISKR/RANK/PCTL/INDEX
     const keys = Object.keys(attrs);
     const cand = keys.find((k) => {
       const up = k.toUpperCase();
-      return up.includes("COLD") && up.endsWith("RISKS") &&
+      return up.includes("CWAV") && up.endsWith("RISKS") &&
         !up.includes("RISKR") && !up.includes("RANK") &&
         !up.includes("PCTL") && !up.includes("INDEX");
     });
@@ -202,9 +202,9 @@ export async function GET(req: NextRequest) {
     const state  = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
     const body: any = {
-      level: out.level,          // EXACT NRI (RISKR Cold Wave)
+      level: out.level,          // EXACT NRI (CWAV_RISKR)
       label: out.label,
-      score: out.score,          // COLD_RISKS (0–100)
+      score: out.score,          // CWAV_RISKS (0–100)
       adminUnit: "tract",
       county, state,
       provider: "FEMA National Risk Index (tract)"
@@ -230,7 +230,7 @@ export async function GET(req: NextRequest) {
     const body: any = {
       level: out.level,
       label: out.label,
-      score: out.score,          // COLD_RISKS (0–100)
+      score: out.score,          // CWAV_RISKS (0–100)
       adminUnit: "county",
       county: countyName, state,
       provider: "FEMA National Risk Index (county)"
