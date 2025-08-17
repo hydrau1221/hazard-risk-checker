@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** NRI – services publics (AGOL) – mêmes couches que Landslide */
+/** NRI – services publics (AGOL) */
 const NRI_TRACTS =
   process.env.NRI_TRACTS_URL ??
   "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0";
@@ -12,15 +12,9 @@ const NRI_COUNTIES =
   process.env.NRI_COUNTIES_URL ??
   "https://services5.arcgis.com/W1uyphp8h2tna3qJ/ArcGIS/rest/services/NRI_GDB_Counties_%282%29/FeatureServer/0";
 
-type Five =
-  | "Very Low"
-  | "Low"
-  | "Moderate"
-  | "High"
-  | "Very High"
-  | "Undetermined";
+type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined";
 
-/** Mappe le libellé NRI (RISKR) → nos 5 niveaux. */
+/** Mappe le libellé NRI (RISKR) → nos 5 niveaux (pas de calcul depuis le score). */
 function mapLabelToFive(raw: unknown): Five {
   if (raw == null) return "Undetermined";
   const s = String(raw).toLowerCase().replace(/[\s_\-()/]+/g, "");
@@ -43,33 +37,18 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
   return null;
 }
 
-/** Essaie d'extraire l'identifiant du tract (GEOID/TRACTFIPS/…). */
-function readTractId(attrs: Record<string, any>) {
-  const CANDIDATES = ["TRACTFIPS", "GEOID", "GEOID10", "TRACT"];
-  for (const k of Object.keys(attrs)) {
-    const up = k.toUpperCase();
-    if (CANDIDATES.includes(up)) {
-      const val = attrs[k];
-      if (val != null && String(val).trim() !== "") {
-        return { key: k, value: String(val).trim() };
-      }
-    }
-  }
-  return null;
-}
-
 /** 🔒 Lecture stricte des champs COLD WAVE :
  *  - Catégorie officielle: ...COLD_RISKR  (texte "Relatively ...")
  *  - Score Cold Wave:      ...COLD_RISKS  (0–100)  (PAS percentile/rank/index)
  */
 function extractCold(attrs: Record<string, any>) {
-  // label
+  // label (catégorie officielle)
   const riskR = findAttr(attrs, [
-    /(^|_)COLD_RISKR$/i,          // exact "COLD_RISKR" (éventuel préfixe)
+    /(^|_)COLD_RISKR$/i,          // exact "COLD_RISKR" (avec éventuel préfixe)
     /(^|_)(COLD).*_RISKR$/i,      // fallback: contient COLD + _RISKR
   ]);
 
-  // score (privilégie COLD_RISKS)
+  // score (toujours ...COLD_RISKS)
   let riskS = findAttr(attrs, [/^(.+_)?COLD_RISKS$/i]);
 
   if (!riskS) {
@@ -84,7 +63,7 @@ function extractCold(attrs: Record<string, any>) {
     if (cand) riskS = { key: cand, value: attrs[cand] };
   }
 
-  // Convertit le score en 0–100 si besoin
+  // Convertit le score en 0–100 si besoin (certaines sources renvoient 0–1)
   let score: number | null = null;
   if (riskS && typeof riskS.value === "number" && Number.isFinite(riskS.value)) {
     score = riskS.value <= 1.5 ? riskS.value * 100 : riskS.value;
@@ -120,9 +99,7 @@ async function query(feature0Url: string, p: Record<string, string>) {
   const r = await fetch(url, { cache: "no-store" });
   const text = await r.text();
   let j: any = null;
-  try {
-    j = text ? JSON.parse(text) : null;
-  } catch {}
+  try { j = text ? JSON.parse(text) : null; } catch {}
   if (!r.ok) return { ok: false as const, status: r.status, url, body: text };
   const feat = j?.features?.[0];
   return { ok: true as const, url, attrs: feat?.attributes ?? null };
@@ -142,7 +119,7 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
   attempts.push({ step: "point:within", url: (pWithin as any).url });
   if (pWithin.ok && pWithin.attrs) return { pick: pWithin, attempts };
 
-  // 2) Point INTERSECTS avec tolérance (3m → 7m → 15m → 30m)
+  // 2) Point INTERSECTS avec tolérance
   for (const d of [3, 7, 15, 30]) {
     const pInter = await query(feature0Url, {
       geometry: JSON.stringify({ x: lon, y: lat }),
@@ -160,11 +137,7 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
   const env = tinyEnvelope(lon, lat, 50);
   const eInter = await query(feature0Url, {
     geometry: JSON.stringify({
-      xmin: env.xmin,
-      ymin: env.ymin,
-      xmax: env.xmax,
-      ymax: env.ymax,
-      spatialReference: { wkid: 4326 },
+      xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax, spatialReference: { wkid: 4326 }
     }),
     geometryType: "esriGeometryEnvelope",
     inSR: "4326",
@@ -204,9 +177,7 @@ export async function GET(req: NextRequest) {
   try {
     if (address && (!lat || !lon)) {
       const g = await geocodeFromAddress(req, address);
-      latNum = g.lat;
-      lonNum = g.lon;
-      geocodeInfo = g.geocode;
+      latNum = g.lat; lonNum = g.lon; geocodeInfo = g.geocode;
     } else {
       latNum = Number(lat);
       lonNum = Number(lon);
@@ -228,27 +199,22 @@ export async function GET(req: NextRequest) {
     const attrs = tractTry.pick.attrs as Record<string, any>;
     const out = extractCold(attrs);
     const county = attrs.COUNTY ?? attrs.COUNTY_NAME ?? attrs.NAME ?? null;
-    const state = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
-    const tid = readTractId(attrs); // <- tractId
+    const state  = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
     const body: any = {
       level: out.level,          // EXACT NRI (RISKR Cold Wave)
       label: out.label,
       score: out.score,          // COLD_RISKS (0–100)
       adminUnit: "tract",
-      tractId: tid?.value ?? null,
-      county,
-      state,
-      provider: "FEMA National Risk Index (tract)",
+      county, state,
+      provider: "FEMA National Risk Index (tract)"
     };
-    if (debug)
-      body.debug = {
-        geocode: geocodeInfo ?? null,
-        steps,
-        usedFields: { ...out.usedFields, tractIdField: tid?.key ?? null },
-        attrKeys: Object.keys(attrs).sort(),
-      };
-
+    if (debug) body.debug = {
+      geocode: geocodeInfo ?? null,
+      steps,
+      usedFields: out.usedFields,
+      attrKeys: Object.keys(attrs).sort()
+    };
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
@@ -259,25 +225,22 @@ export async function GET(req: NextRequest) {
     const attrs = countyTry.pick.attrs as Record<string, any>;
     const out = extractCold(attrs);
     const countyName = attrs.COUNTY ?? attrs.COUNTY_NAME ?? attrs.NAME ?? null;
-    const state = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
+    const state      = attrs.STATE ?? attrs.STATE_NAME ?? attrs.ST_ABBR ?? null;
 
     const body: any = {
       level: out.level,
       label: out.label,
-      score: out.score,
+      score: out.score,          // COLD_RISKS (0–100)
       adminUnit: "county",
-      county: countyName,
-      state,
-      provider: "FEMA National Risk Index (county)",
+      county: countyName, state,
+      provider: "FEMA National Risk Index (county)"
     };
-    if (debug)
-      body.debug = {
-        geocode: geocodeInfo ?? null,
-        steps,
-        usedFields: out.usedFields,
-        attrKeys: Object.keys(attrs).sort(),
-      };
-
+    if (debug) body.debug = {
+      geocode: geocodeInfo ?? null,
+      steps,
+      usedFields: out.usedFields,
+      attrKeys: Object.keys(attrs).sort()
+    };
     return Response.json(body, { headers: { "cache-control": "no-store" } });
   }
 
