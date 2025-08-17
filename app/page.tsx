@@ -145,7 +145,7 @@ export default function Home() {
 
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes, hurrRes, heatRes] = await Promise.allSettled([
-        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
+        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
         fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
@@ -215,26 +215,30 @@ export default function Home() {
         setHurrLevel(null); setHurrText("NRI hurricane fetch failed.");
       }
 
-      // Heatwave (NRI)
-      if (heatRes.status === "fulfilled") {
-        const r = heatRes.value; const j = await r.json();
-        if (r.ok) {
-          const lvl = (j.level as RiskLevel) ?? "Undetermined";
-          setHeatLevel(lvl);
-          const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head =
-            (lvl === "Undetermined") ? "UNDETERMINED" :
-            (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-            `${String(lvl).toUpperCase()} RISK`;
-          const scorePart = s !== null ? ` — score ${s}` : "";
-          const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
-          setHeatText(`${head}${scorePart}${srcPart}`);
-        } else {
-          setHeatLevel(null); setHeatText(j?.error || "NRI heatwave query failed.");
-        }
-      } else {
-        setHeatLevel(null); setHeatText("NRI heatwave fetch failed.");
-      }
+// Heatwave (NRI)
+if (heatRes.status === "fulfilled") {
+  const r = heatRes.value; const j = await r.json();
+  if (r.ok) {
+    const lvl = (j.level as RiskLevel) ?? "Undetermined";
+    setHeatLevel(lvl);
+    const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
+    const head =
+      (lvl === "Undetermined") ? "UNDETERMINED" :
+      (lvl === "Not Applicable") ? "NOT APPLICABLE" :
+      `${String(lvl).toUpperCase()} RISK`;
+    const scorePart = s !== null ? ` — score ${s}` : "";
+    const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
+    setHeatText(`${head}${scorePart}${srcPart}`);
+  } else {
+    // ❗ active quand même la carte avec badge UNDETERMINED
+    setHeatLevel("Undetermined");
+    setHeatText(j?.error || "NRI heatwave query failed.");
+  }
+} else {
+  // ❗ active quand même la carte avec badge UNDETERMINED
+  setHeatLevel("Undetermined");
+  setHeatText("NRI heatwave fetch failed.");
+}
 
     } catch (e: any) {
       setError(e.message || String(e));
