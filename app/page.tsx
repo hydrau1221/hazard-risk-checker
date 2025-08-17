@@ -124,7 +124,7 @@ export default function Home() {
 
         // Si le géocode a renvoyé un centroïde de ville, on l’indique à l’utilisateur
         if (gj?.precision === "city") {
-          setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
+          setGeoNote(`Exact address not found. Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""});
         } else {
           setGeoNote(null);
         }
