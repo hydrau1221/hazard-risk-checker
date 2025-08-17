@@ -7,7 +7,7 @@ type RiskLevel =
   | "Very Low" | "Low" | "Moderate" | "High" | "Very High"
   | "Undetermined" | "Not Applicable";
 
-const LAYER_ID = 28; // FEMA NFHL - Flood Hazard Zones
+const LAYER_ID = 28;
 
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
   "Very Low":   { bg: "#dcfce7", badge: "#16a34a", text: "#14532d", border: "#86efac" },
@@ -19,7 +19,6 @@ const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; bord
   "Not Applicable": { bg: "#f1f5f9", badge: "#64748b", text: "#334155", border: "#cbd5e1" },
 };
 
-// ---------- Flood classification ----------
 function classifyFlood(features: Feature[] | null): {
   level: RiskLevel; zone: string; sfha: boolean; bfe: string | null; note: string;
 } {
@@ -29,32 +28,22 @@ function classifyFlood(features: Feature[] | null): {
   const a = features[0].attributes || {};
   const zone = String(a.FLD_ZONE ?? a.ZONE ?? a.ZONE_SUBTY ?? a.ZONE_SUBTYPE ?? "N/A").toUpperCase();
   const subty = String(a.ZONE_SUBTY ?? a.ZONE_SUBTYPE ?? "").toUpperCase();
-
   const bfeRaw = a.BFE ?? a.STATIC_BFE ?? a.DEPTH ?? null;
   const bfe = bfeRaw == null || Number(bfeRaw) === -9999 ? null : String(bfeRaw);
-
   const inSFHA =
     a.SFHA_TF === true || a.SFHA_TF === "T" || a.SFHA_TF === "Y" ||
     ["A","AE","AO","AH","A1","A2","A3","A99","VE","V","V1"].some(p => zone.startsWith(p));
-
   const isFloodway = subty.includes("FLOODWAY");
-  const isShadedX =
-    zone === "X" && (subty.includes("0.2") || subty.includes("0.2 PCT") || subty.includes("0.2%") || subty.includes("SHADED"));
-
+  const isShadedX = zone === "X" && (subty.includes("0.2") || subty.includes("0.2%") || subty.includes("SHADED"));
   let level: RiskLevel, note = "";
   if (zone.startsWith("VE") || zone.startsWith("V")) { level = "Very High"; note = "Coastal high hazard (wave action)"; }
   else if (isFloodway) { level = "High"; note = "Regulatory floodway (within SFHA)"; }
   else if (["AO","AH","AE","A","A99"].includes(zone) || zone.startsWith("A1") || zone.startsWith("A2") || zone.startsWith("A3")) {
     level = "High"; note = "Special Flood Hazard Area (1% annual chance)"; }
-  else if (isShadedX) {
-    level = "Moderate"; note = "0.2% annual chance flood (Zone X shaded)"; }
-  else if (zone === "X") {
-    level = "Low"; note = "Outside SFHA (Zone X unshaded)"; }
-  else if (zone === "D") {
-    level = "Undetermined"; note = "Flood data not available (Zone D)"; }
-  else {
-    level = inSFHA ? "High" : "Low"; note = "See FEMA NFHL details"; }
-
+  else if (isShadedX) { level = "Moderate"; note = "0.2% annual chance flood (Zone X shaded)"; }
+  else if (zone === "X") { level = "Low"; note = "Outside SFHA (Zone X unshaded)"; }
+  else if (zone === "D") { level = "Undetermined"; note = "Flood data not available (Zone D)"; }
+  else { level = inSFHA ? "High" : "Low"; note = "See FEMA NFHL details"; }
   return { level, zone, sfha: inSFHA, bfe, note };
 }
 
@@ -62,37 +51,31 @@ export default function Home() {
   const [address, setAddress] = useState("1600 Pennsylvania Ave NW, Washington, DC");
   const [loading, setLoading] = useState<"idle" | "geocode" | "fetch">("idle");
 
-  // Flood
   const [floodLevel, setFloodLevel] = useState<RiskLevel | null>(null);
-  const [floodText, setFloodText] = useState<string>("Enter your address and press Check.");
+  const [floodText, setFloodText] = useState("Enter your address and press Check.");
 
-  // Earthquake
   const [eqLevel, setEqLevel] = useState<RiskLevel | null>(null);
-  const [eqText, setEqText] = useState<string>("Enter your address and press Check.");
+  const [eqText, setEqText] = useState("Enter your address and press Check.");
 
-  // Landslide
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
-  const [lsText, setLsText] = useState<string>("Enter your address and press Check.");
+  const [lsText, setLsText] = useState("Enter your address and press Check.");
 
-  // Hurricane
   const [hurrLevel, setHurrLevel] = useState<RiskLevel | null>(null);
-  const [hurrText, setHurrText] = useState<string>("Enter your address and press Check.");
+  const [hurrText, setHurrText] = useState("Enter your address and press Check.");
 
-  // Heatwave
   const [heatLevel, setHeatLevel] = useState<RiskLevel | null>(null);
-  const [heatText, setHeatText] = useState<string>("Enter your address and press Check.");
+  const [heatText, setHeatText] = useState("Enter your address and press Check.");
 
-  // Cold Wave
   const [coldLevel, setColdLevel] = useState<RiskLevel | null>(null);
-  const [coldText, setColdText] = useState<string>("Enter your address and press Check.");
+  const [coldText, setColdText] = useState("Enter your address and press Check.");
 
-  // Tornado
   const [torLevel, setTorLevel] = useState<RiskLevel | null>(null);
-  const [torText, setTorText] = useState<string>("Enter your address and press Check.");
+  const [torText, setTorText] = useState("Enter your address and press Check.");
+
+  const [wfLevel, setWfLevel] = useState<RiskLevel | null>(null);
+  const [wfText, setWfText] = useState("Enter your address and press Check.");
 
   const [error, setError] = useState<string | null>(null);
-
-  // Note quand le géocode tombe sur un centroïde de ville
   const [geoNote, setGeoNote] = useState<string | null>(null);
 
   function parseLatLon(s: string): {lat:number, lon:number} | null {
@@ -116,9 +99,9 @@ export default function Home() {
     setHeatLevel(null);  setHeatText("Geocoding address…");
     setColdLevel(null);  setColdText("Geocoding address…");
     setTorLevel(null);   setTorText("Geocoding address…");
+    setWfLevel(null);    setWfText("Geocoding address…");
 
     try {
-      // 1) lat,lon direct ?
       const ll = parseLatLon(address);
       let lat: number, lon: number;
 
@@ -129,17 +112,13 @@ export default function Home() {
         const gj = await g.json();
         if (!g.ok) throw new Error(gj?.error || "Error fetching coordinates.");
         lat = gj.lat; lon = gj.lon;
-
         const isCityCentroid = (gj && (gj.precision === "city" || gj.mode === "city"));
         if (isCityCentroid) {
           const label = gj?.placeLabel || gj?.matched || gj?.display_name || "";
           setGeoNote(`Exact address not found. Using city centroid${label ? `: ${label}` : ""}. Results are generalized.`);
-        } else {
-          setGeoNote(null);
         }
       }
 
-      // 2) requêtes parallèles
       setLoading("fetch");
       setFloodText("Querying FEMA NFHL…");
       setEqText("Querying USGS (Design Maps)…");
@@ -148,15 +127,17 @@ export default function Home() {
       setHeatText("Querying NRI Heatwave…");
       setColdText("Querying NRI Cold Wave…");
       setTorText("Querying NRI Tornado…");
+      setWfText("Querying Risk to Homes (pixel)…");
 
-      const [femaRes, eqRes, lsRes, hurrRes, heatRes, coldRes, torRes] = await Promise.allSettled([
+      const [femaRes, eqRes, lsRes, hurrRes, heatRes, coldRes, torRes, wfRes] = await Promise.allSettled([
         fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
         fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
-        fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-        fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
-        fetch(`/api/tornado/risk?lat=${lat}&lon=${lon}&debug=1`, { cache: "no-store" }),
+        fetch(`/api/hurricane/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/heatwave/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/coldwave/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/tornado/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
+        fetch(`/api/wildfire/homes?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
       ]);
 
       // Flood
@@ -187,9 +168,9 @@ export default function Home() {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setLsLevel(lvl);
           const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                       `${String(lvl).toUpperCase()} RISK`;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED"
+            : (lvl === "Not Applicable") ? "NOT APPLICABLE"
+            : `${String(lvl).toUpperCase()} RISK`;
           const scorePart = s !== null ? ` — score ${s}` : "";
           const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
           setLsText(`${head} susceptibility${scorePart}${srcPart}`);
@@ -203,9 +184,9 @@ export default function Home() {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setHurrLevel(lvl);
           const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                       `${String(lvl).toUpperCase()} RISK`;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED"
+            : (lvl === "Not Applicable") ? "NOT APPLICABLE"
+            : `${String(lvl).toUpperCase()} RISK`;
           const scorePart = s !== null ? ` — score ${s}` : "";
           const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
           setHurrText(`${head}${scorePart}${srcPart}`);
@@ -219,9 +200,9 @@ export default function Home() {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setHeatLevel(lvl);
           const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                       `${String(lvl).toUpperCase()} RISK`;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED"
+            : (lvl === "Not Applicable") ? "NOT APPLICABLE"
+            : `${String(lvl).toUpperCase()} RISK`;
           const scorePart = s !== null ? ` — score ${s}` : "";
           const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
           setHeatText(`${head}${scorePart}${srcPart}`);
@@ -235,9 +216,9 @@ export default function Home() {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setColdLevel(lvl);
           const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                       `${String(lvl).toUpperCase()} RISK`;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED"
+            : (lvl === "Not Applicable") ? "NOT APPLICABLE"
+            : `${String(lvl).toUpperCase()} RISK`;
           const scorePart = s !== null ? ` — score ${s}` : "";
           const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
           setColdText(`${head}${scorePart}${srcPart}`);
@@ -250,16 +231,16 @@ export default function Home() {
         setColdText("NRI cold wave fetch failed.");
       }
 
-      // Tornado (NRI)
+      // Tornado
       if (torRes.status === "fulfilled") {
         const r = torRes.value; const j = await r.json();
         if (r.ok) {
           const lvl = (j.level as RiskLevel) ?? "Undetermined";
           setTorLevel(lvl);
           const s = Number.isFinite(Number(j.score)) ? Math.round(Number(j.score) * 10) / 10 : null;
-          const head = (lvl === "Undetermined") ? "UNDETERMINED" :
-                       (lvl === "Not Applicable") ? "NOT APPLICABLE" :
-                       `${String(lvl).toUpperCase()} RISK`;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED"
+            : (lvl === "Not Applicable") ? "NOT APPLICABLE"
+            : `${String(lvl).toUpperCase()} RISK`;
           const scorePart = s !== null ? ` — score ${s}` : "";
           const srcPart = j.adminUnit ? ` — source: ${j.adminUnit}` : "";
           setTorText(`${head}${scorePart}${srcPart}`);
@@ -270,6 +251,28 @@ export default function Home() {
       } else {
         setTorLevel("Undetermined");
         setTorText("NRI tornado fetch failed.");
+      }
+
+      // Wildfire — Risk to Homes (pixel)
+      if (wfRes.status === "fulfilled") {
+        const r = wfRes.value; const j = await r.json();
+        if (r.ok) {
+          const lvl = (j.level as RiskLevel) ?? "Undetermined";
+          setWfLevel(lvl);
+          const v =
+            Number.isFinite(Number(j.value)) ? Math.round(Number(j.value) * 1000) / 1000 : null;
+          const head = (lvl === "Undetermined") ? "UNDETERMINED"
+            : (lvl === "Not Applicable") ? "NOT APPLICABLE"
+            : `${String(lvl).toUpperCase()} RISK TO HOMES`;
+          const valuePart = v !== null ? ` — value ${v}` : "";
+          setWfText(`${head}${valuePart} — source: pixel`);
+        } else {
+          setWfLevel("Undetermined");
+          setWfText(j?.error || "Risk to Homes query failed.");
+        }
+      } else {
+        setWfLevel("Undetermined");
+        setWfText("Risk to Homes fetch failed.");
       }
 
     } catch (e: any) {
@@ -338,13 +341,7 @@ export default function Home() {
   const heatCard  = makeCard("Heatwave", heatLevel, heatText);
   const coldCard  = makeCard("Cold Wave", coldLevel, coldText);
   const torCard   = makeCard("Tornado", torLevel, torText);
-
-  const placeholderCard = (title: string, text: string) => (
-    <section style={card}>
-      <div style={sectionHeader}><h2 style={{ ...h2, margin: 0 }}>{title}</h2></div>
-      <div style={cardBody}><div style={small}>{text}</div></div>
-    </section>
-  );
+  const wfCard    = makeCard("Wildfire", wfLevel, wfText); // affiche "RISK TO HOMES" dans le texte
 
   return (
     <div>
@@ -382,10 +379,10 @@ export default function Home() {
           {heatCard}
           {coldCard}
           {torCard}
-          {placeholderCard("Wildfire", "Enter your address and press Check.")}
+          {wfCard}
         </div>
         <div style={foot}>
-          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave, Cold Wave, Tornado).
+          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Hurricane, Heatwave, Cold Wave, Tornado) • USFS/Wildfire Risk to Communities (Wildfire — Risk to Homes, pixel).
         </div>
       </main>
     </div>
