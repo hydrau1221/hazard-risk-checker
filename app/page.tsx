@@ -188,18 +188,24 @@ export default function Home() {
         } else { setEqLevel(null); setEqText(j?.error || "USGS query failed."); }
       } else { setEqLevel(null); setEqText("USGS fetch failed."); }
 
-      // -------- Helper NRI (MIS À JOUR) --------
-      // Affiche: "<level en minuscule> risk — susceptibility — score XX.X — tract <ID>"
-      // Et si lvl = NA/Undetermined => chaîne vide (rien dans l'encadré blanc).
-      const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
-        if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
-        const levelWord = `${String(lvl).toLowerCase()} risk`;
-        const levelWord = word.charAt(0).toUpperCase() + word.slice(1);
-        const parts: string[] = [`${levelWord} susceptibility`];
-        if (s !== null) parts.push(`score ${s}`);
-        if (tractId) parts.push(`tract ${tractId}`);
-        return parts.join(" — ");
-      };
+// -------- Helper NRI --------
+const formatNri = (lvl: RiskLevel, score: any, tractId?: string | null) => {
+  // rien dans le bloc blanc pour NA/Undetermined
+  if (lvl === "Undetermined" || lvl === "Not Applicable") return "";
+
+  // "Low risk" avec majuscule initiale, et pas de tiret avant "susceptibility"
+  const word = `${String(lvl).toLowerCase()} risk`;
+  const levelWord = word.charAt(0).toUpperCase() + word.slice(1); // "Low risk"
+
+  const parts: string[] = [`${levelWord} susceptibility`];
+
+  const s = Number.isFinite(Number(score)) ? Math.round(Number(score) * 10) / 10 : null;
+  if (s !== null) parts.push(`score ${s}`);
+  if (tractId) parts.push(`tract ${tractId}`);
+
+  return parts.join(" — ");
+};
+
 
       // Landslide (NRI)
       if (lsRes.status === "fulfilled") {
