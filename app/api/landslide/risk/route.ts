@@ -42,26 +42,22 @@ function findAttr(attrs: Record<string, any>, patterns: RegExp[]) {
  *  - Score Landslide:      ...LNDS_RISKS  (0–100)  (PAS le Risk Index global)
  */
 function extract(attrs: Record<string, any>) {
-  // --- label (obligatoire pour la classe officielle)
   const riskR = findAttr(attrs, [
-    /(^|_)LNDS_RISKR$/i,              // match exact "LNDS_RISKR" (avec éventuel préfixe)
-    /(^|_)LNDS.*_RISKR$/i,            // sinon, n'importe quel "...LNDS..._RISKR"
+    /(^|_)LNDS_RISKR$/i,
+    /(^|_)LNDS.*_RISKR$/i,
   ]);
 
-  // --- score landslide (très strict) : on NE prend que "...LNDS_RISKS"
   let riskS = findAttr(attrs, [
-    /(^|_)LNDS_RISKS$/i,              // exact "LNDS_RISKS" (avec éventuel préfixe)
+    /(^|_)LNDS_RISKS$/i,
   ]);
 
-  // Si pas trouvé (certains services préfixent différemment), on cherche un fallback
-  // mais en restant PRUDENT : LNDS + RISK + S à la fin, sans RANK/PCTL/INDEX/RISKR.
   if (!riskS) {
     const keys = Object.keys(attrs);
     const cand = keys.find(k => {
       const up = k.toUpperCase();
       return up.includes("LNDS")
         && up.endsWith("RISKS")
-        && !up.includes("RISKR")   // pas le rating
+        && !up.includes("RISKR")
         && !up.includes("RANK")
         && !up.includes("PCTL")
         && !up.includes("INDEX");
@@ -69,7 +65,6 @@ function extract(attrs: Record<string, any>) {
     if (cand) riskS = { key: cand, value: attrs[cand] };
   }
 
-  // Convertit le score en 0–100 si besoin (certaines sources renvoient 0–1)
   let score: number | null = null;
   if (riskS && typeof riskS.value === "number" && Number.isFinite(riskS.value)) {
     score = riskS.value <= 1.5 ? riskS.value * 100 : riskS.value;
@@ -209,7 +204,7 @@ export async function GET(req: NextRequest) {
     const body: any = {
       level: out.level,          // EXACT NRI (RISKR Landslide)
       label: out.label,
-      score: out.score,          // LNDS_RISKS (info) — ex. 77.7
+      score: out.score,          // LNDS_RISKS (info)
       adminUnit: "tract",
       county, state,
       provider: "FEMA National Risk Index (tract)"
