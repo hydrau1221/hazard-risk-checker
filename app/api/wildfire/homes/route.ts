@@ -13,11 +13,14 @@ const SOURCES: Array<{ url: string; name: string }> = [
 /** Fonctions "classées" possibles suivant les serveurs */
 const CLASS_FUNCS = ["RPS_Class", "ClassifiedRPS", "ClassRPS"] as const;
 
+/** Taille de pixel supposée (~270m) + demi-pixel pour micro-sampling */
+const PIXEL_M = Number(process.env.WFR_PIXEL_M || 270);
+const HALF_PIXEL_M = PIXEL_M / 2;
+
 type Five = "Very Low" | "Low" | "Moderate" | "High" | "Very High" | "Undetermined" | "Not Applicable";
 const LEVEL_SCORE: Record<Five, number> = {
   "Not Applicable": 0, Undetermined: 0, "Very Low": 1, Low: 2, Moderate: 3, High: 4, "Very High": 5,
 };
-
 function higher(a: Five, b: Five): Five {
   return LEVEL_SCORE[a] >= LEVEL_SCORE[b] ? a : b;
 }
@@ -71,7 +74,8 @@ async function getSamples(baseUrl: string, params: Record<string,string>, timeou
     geometryType: "esriGeometryPoint",
     returnFirstValueOnly: "true",
     interpolation: "RSP_NearestNeighbor",
-    pixelSize: JSON.stringify({ x: 0.0025, y: 0.0025, spatialReference: { wkid: 4326 } }), // ~270m
+    // pixelSize ~270m pour coller au produit (évite une pyramide trop lissée)
+    pixelSize: JSON.stringify({ x: 0.0025, y: 0.0025, spatialReference: { wkid: 4326 } }),
     ...params,
   });
   const url = `${baseUrl}/getSamples?${u.toString()}`;
@@ -108,13 +112,12 @@ async function readClass(baseUrl: string, lat: number, lon: number, timeoutMs: n
       const level = levelFromClassCode(num);
       return { ok: true, level, value: num, raw: num, rule: fn };
     }
-    // 0..255 (byte colorisé)
+    // 0..255 (byte colorisé) → converti en classe 1..5
     if (num >= 0 && num <= 255) {
       const cls = byteToClass(num);
       const level = levelFromClassCode(cls);
       return { ok: true, level, value: cls, raw: num, rule: fn };
     }
-    // Autre — on ignore
   }
   return { ok: false, level: "Not Applicable" as Five, value: null as number | null, raw: null as any, rule: null as any };
 }
@@ -139,10 +142,9 @@ async function readRps(baseUrl: string, lat: number, lon: number, timeoutMs: num
 
   // normalisation (ordre important)
   let rps = num;
-  if (num <= 1.5) rps = num * 1020;              // 0..1
+  if (num <= 1.5) rps = num * 1020;                  // 0..1
+  else if (num > 0 && num <= 100) rps = num * 10.2;  // 0..100
   else if (num > 0 && num <= 255) rps = (num / 255) * 1020; // 0..255 (certains serveurs)
-  else if (num > 255 && num <= 1000) rps = num;             // ~0..1020
-  else if (num > 0 && num <= 100) rps = num * 10.2;         // 0..100 (si jamais)
   else if (num > 1020 && num <= 2000) rps = (num / 2000) * 1020;
 
   const level = levelFromRps(rps);
@@ -171,7 +173,27 @@ async function readBestAtPoint(baseUrl: string, lat: number, lon: number, timeou
   return { level, value, variant, hasAny: (cls.ok && cls.value != null) || (rps.ok && rps.value != null) };
 }
 
-/** Balaye voisinage et garde la sévérité MAX (pas le premier trouvé) */
+/** Micro-échantillonnage 3×3 à ±½ pixel : renvoie la SEVERITE MAX */
+async function readBestMicrogrid(baseUrl: string, lat: number, lon: number, timeoutMs: number) {
+  const dLat = degPerMeterLat() * HALF_PIXEL_M;
+  const dLon = degPerMeterLon(lat) * HALF_PIXEL_M;
+  let best: { level: Five; value: number|null; variant: any } | null = null;
+
+  for (const dy of [-1, 0, 1]) {
+    for (const dx of [-1, 0, 1]) {
+      const lt = lat + dy * dLat;
+      const ln = lon + dx * dLon;
+      const res = await readBestAtPoint(baseUrl, lt, ln, timeoutMs);
+      if (!res.hasAny) continue;
+      const cand = { level: res.level, value: res.value, variant: res.variant };
+      if (!best || LEVEL_SCORE[cand.level] > LEVEL_SCORE[best.level]) best = cand;
+      if (best.level === "Very High") return best;
+    }
+  }
+  return best; // peut être null si tout est no-data
+}
+
+/** Balaye voisinage (anneaux) et garde la SEVERITE MAX */
 async function sampleNearest(lat: number, lon: number, mode: "fast"|"deep") {
   const STEP_M = Number(process.env.WFR_STEP || (mode === "deep" ? 30 : 60));
   const MAX_RADIUS_M = Number(process.env.WFR_MAX_RADIUS || (mode === "deep" ? 300 : 180));
@@ -180,15 +202,15 @@ async function sampleNearest(lat: number, lon: number, mode: "fast"|"deep") {
   let best: { level: Five; value: number|null; variant: any; meters: number; provider: string } | null = null;
 
   for (const src of SOURCES) {
-    // centre
-    const here = await readBestAtPoint(src.url, lat, lon, TIMEOUT_MS);
-    if (here.hasAny) {
-      const cand = { level: here.level, value: here.value, variant: here.variant, meters: 0, provider: src.name };
+    // 1) micro-grille à ±½ pixel (pour coller à l'affichage au "pixel près")
+    const micro = await readBestMicrogrid(src.url, lat, lon, TIMEOUT_MS);
+    if (micro) {
+      const cand = { level: micro.level, value: micro.value, variant: micro.variant, meters: 0, provider: src.name };
       if (!best || LEVEL_SCORE[cand.level] > LEVEL_SCORE[best.level]) best = cand;
       if (best.level === "Very High") return best;
     }
 
-    // anneaux
+    // 2) anneaux (si besoin)
     for (let radius = STEP_M; radius <= MAX_RADIUS_M; radius += STEP_M) {
       const n = Math.max(8, Math.round((2 * Math.PI * radius) / STEP_M));
       const dLat = degPerMeterLat() * radius;
@@ -262,7 +284,7 @@ export async function GET(req: NextRequest) {
   if (res.meters && res.meters > 0) body.note = `Nearest colored pixel used (~${res.meters} m).`;
   if (res.value == null && !res.meters) body.note = "No pixel value at this location (water / non-burnable / no structures).";
 
-  if (debug) body.debug = { variant: res.variant || null, geocode: geocodeInfo || null };
+  if (debug) body.debug = { variant: res.variant || null, geocode: geocodeInfo || null, microgrid: { pixel_m: PIXEL_M } };
 
   return Response.json(body, { headers: { "cache-control": "no-store" } });
 }
