@@ -40,7 +40,8 @@ export async function GET(req: Request) {
     inSR: "4326",
     spatialRel: "esriSpatialRelIntersects",
     returnGeometry: "false",
-    outFields: "*",
+    outFields: "FLD_ZONE,ZONE_SUBTY,SFHA_TF,BFE,STATIC_BFE,DEPTH,ZONE,ZONE_SUBTYPE",
+    resultRecordCount: "1",
     geometry: JSON.stringify(point),
   };
 
