@@ -7,8 +7,6 @@ type RiskLevel =
   | "Very Low" | "Low" | "Moderate" | "High" | "Very High"
   | "Undetermined" | "Not Applicable";
 
-const LAYER_ID = 28; // FEMA NFHL - Flood Hazard Zones
-
 // Palette unique (inclut Not Applicable)
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
   "Very Low":   { bg: "#dcfce7", badge: "#16a34a", text: "#14532d", border: "#86efac" },
@@ -175,7 +173,7 @@ export default function Home() {
 
       // 2) requêtes parallèles
       const [femaRes, eqRes, lsRes, wfRes, heatRes, coldRes, hurrRes, torRes] = await Promise.allSettled([
-        fetch(`/api/fema/query?lat=${lat}&lon=${lon}&layerId=${LAYER_ID}`, { cache: "no-store" }),
+        fetch(`/api/fema/query?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/earthquake/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/landslide/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
         fetch(`/api/wildfire/risk?lat=${lat}&lon=${lon}`, { cache: "no-store" }),
