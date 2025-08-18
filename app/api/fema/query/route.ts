@@ -1,3 +1,4 @@
+// app/api/fema/query/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["iad1", "cle1", "pdx1"];
@@ -14,9 +15,9 @@ function json(h: Record<string, string> = {}) {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 RiskChecker/1.0";
 
-// Base publique/stable NFHL (overridable par NFHL_BASE si besoin)
+// Base NFHL (tu peux aussi remettre l’ancienne via la VAR d’env)
 const BASE = (process.env.NFHL_BASE ||
-  "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL"
+  "https://hazards.fema.gov/arcgis/rest/services/public/NFHL"
 ).replace(/\/+$/, "");
 
 async function getJson(url: string) {
@@ -26,16 +27,15 @@ async function getJson(url: string) {
   return { ok: r.ok, data };
 }
 
+// 🔎 Trouve l'ID du layer "S_FLD_HAZ_AR" (ou "Flood Hazard Zones") sur la base active
 async function getLayerId(): Promise<number> {
-  // Découvre l’ID du layer "S_FLD_HAZ_AR" si jamais il change
   const meta = await getJson(`${BASE}/MapServer?f=pjson`);
   const layers: any[] = meta.data?.layers ?? [];
   const found = layers.find(l =>
     String(l?.name || "").toUpperCase().includes("S_FLD_HAZ_AR") ||
     String(l?.name || "").toUpperCase().includes("FLOOD HAZARD ZONES")
   );
-  // fallback: 28 (valeur classique)
-  return Number.isFinite(found?.id) ? found.id : 28;
+  return Number.isFinite(found?.id) ? found.id : 28; // fallback si vraiment introuvable
 }
 
 function envelopeAround(lon: number, lat: number, eps = 0.01) {
@@ -46,14 +46,13 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const lat = Number(url.searchParams.get("lat"));
   const lon = Number(url.searchParams.get("lon"));
-  const forcedLayerId = url.searchParams.get("layerId");
   const debug = url.searchParams.get("debug") === "1";
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return new Response(JSON.stringify({ error: "lat, lon are required" }), { status: 400, headers: json() });
   }
 
-  const layerId = Number.isFinite(Number(forcedLayerId)) ? Number(forcedLayerId) : await getLayerId();
+  const layerId = await getLayerId();
 
   const tries: any[] = [];
   const mkQuery = (p: Record<string, string>) => `${BASE}/MapServer/${layerId}/query?${new URLSearchParams(p)}`;
@@ -71,7 +70,7 @@ export async function GET(req: Request) {
   const point = { x: lon, y: lat, spatialReference: { wkid: 4326 } };
   let data: any = null;
 
-  // 1) /query par point avec buffer progressif (0, 5, 15, 40 m)
+  // 1) point avec buffers 0 / 5 / 15 / 40 m
   for (const dist of [0, 5, 15, 40]) {
     const q = mkQuery({
       ...common,
@@ -84,7 +83,7 @@ export async function GET(req: Request) {
     if (!r.data?.error && r.data?.features?.length) { data = r.data; break; }
   }
 
-  // 2) /query par enveloppe si rien trouvé
+  // 2) envelope
   if (!data) {
     const env = { xmin: lon - 0.004, ymin: lat - 0.004, xmax: lon + 0.004, ymax: lat + 0.004, spatialReference: { wkid: 4326 } };
     const q2 = mkQuery({ ...common, geometryType: "esriGeometryEnvelope", geometry: JSON.stringify(env) });
@@ -93,7 +92,7 @@ export async function GET(req: Request) {
     if (!r2.data?.error && r2.data?.features?.length) data = { ...r2.data, __fallbackEnvelope: env };
   }
 
-  // 3) /identify (tolerance) si toujours rien
+  // 3) identify (tolérance)
   if (!data) {
     const env = envelopeAround(lon, lat, 0.01);
     const p = {
@@ -117,14 +116,12 @@ export async function GET(req: Request) {
         __fromIdentify: true,
       };
     } else if (r3.data?.error) {
-      const body = debug ? { error: r3.data.error?.message || "NFHL error", details: r3.data, __debug: tries } : { error: r3.data.error?.message || "NFHL error" };
+      const body = debug ? { error: r3.data.error?.message || "NFHL error", details: r3.data, __debug: tries, __layerId: layerId } : { error: r3.data.error?.message || "NFHL error" };
       return new Response(JSON.stringify(body), { status: 502, headers: json() });
     }
   }
 
-  // 4) si malgré tout rien trouvé → features vides (le client décidera)
   if (!data) data = { features: [] };
-
-  const body = debug ? { ...data, __layerId: layerId, __debug: tries } : data;
+  const body = debug ? { ...data, __debug: tries, __layerId: layerId } : data;
   return new Response(JSON.stringify(body), { headers: json() });
 }
