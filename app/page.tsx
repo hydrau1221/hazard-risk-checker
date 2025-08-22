@@ -505,7 +505,7 @@ export default function Home() {
     rel="noopener noreferrer"
     style={{ color: "#0a66c2", textDecoration: "none", fontWeight: 600 }}
   >
-    Connect on LinkedIn
+    Find me on LinkedIn
   </a>
 </div>
 
