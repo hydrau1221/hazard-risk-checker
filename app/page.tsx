@@ -9,7 +9,7 @@ type RiskLevel =
   | "Undetermined" | "Not Applicable";
 
 // ====== CONFIG ======
-const FIVERR_URL = "https://www.fiverr.com/your_gig_slug"; // <-- remplace par ton lien Fiverr
+const FIVERR_URL = "https://fr.fiverr.com/s/dD1zYLG"; // <-- remplace par ton lien Fiverr
 
 // Périls qui déclenchent la CTA (si niveau ≥ Moderate)
 const CTA_HAZARDS = new Set(["Flood", "Earthquake", "Landslide", "Wildfire", "Hurricane", "Tornado"]);
