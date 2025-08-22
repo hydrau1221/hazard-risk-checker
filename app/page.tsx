@@ -465,7 +465,7 @@ export default function Home() {
           </div>
         )}
 
-     <div style={grid}>
+  <div style={grid}>
   {floodCard}
   {eqCard}
   {lsCard}
