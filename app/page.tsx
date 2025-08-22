@@ -164,7 +164,7 @@ export default function Home() {
         lat = gj.lat; lon = gj.lon;
         const precision = (gj?.precision === "city") ? "city" : "address";
         setGeoPrecision(precision);
-        if (precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
+        if (precision === "city") setGeoNote(`ℹ️ Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
       }
 
       setLoading("fetch");
@@ -408,7 +408,7 @@ export default function Home() {
           </div>
         )}
         {geoNote && (
-          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fef3c7", border: "1px solid #fde68a", color: "#78350f", padding: 10, borderRadius: 6 }}>
+          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fef3c7", border: "1px solid #f59e0b", color: "#92400e", padding: 10, borderRadius: 6 }}>
             {geoNote}
           </div>
         )}
