@@ -8,11 +8,12 @@ type RiskLevel =
   | "Undetermined" | "Not Applicable";
 
 // ====== CONFIG ======
-const FIVERR_URL = "https://www.fiverr.com/s/e61kLq3"; // <-- remplace par ton lien Fiverr
+const FIVERR_URL = "https://fr.fiverr.com/s/dD1zYLG"; // <-- remplace par ton lien Fiverr
 
 // Périls qui déclenchent la CTA (si niveau ≥ Moderate)
 const CTA_HAZARDS = new Set(["Flood", "Earthquake", "Landslide", "Wildfire", "Hurricane", "Tornado"]);
 
+// Palette unique (inclut Not Applicable)
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
   "Very Low":   { bg: "#dcfce7", badge: "#16a34a", text: "#14532d", border: "#86efac" },
   Low:          { bg: "#dbeafe", badge: "#1d4ed8", text: "#0c4a6e", border: "#93c5fd" },
@@ -93,35 +94,35 @@ export default function Home() {
 
   // Flood
   const [floodLevel, setFloodLevel] = useState<RiskLevel | null>(null);
-  const [floodText, setFloodText]   = useState<string>("Enter any address to see its hazard risk");
+  const [floodText, setFloodText]   = useState<string>("Enter your address to see your hazard risk");
 
   // Earthquake
   const [eqLevel, setEqLevel] = useState<RiskLevel | null>(null);
-  const [eqText,  setEqText]  = useState<string>("Enter any address to see its hazard risk");
+  const [eqText,  setEqText]  = useState<string>("Enter your address to see your hazard risk");
 
   // Landslide (NRI)
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
-  const [lsText,  setLsText]  = useState<string>("Enter any address to see its hazard risk");
+  const [lsText,  setLsText]  = useState<string>("Enter your address to see your hazard risk");
 
   // Wildfire (NRI)
   const [wfLevel, setWfLevel] = useState<RiskLevel | null>(null);
-  const [wfText,  setWfText]  = useState<string>("Enter any address to see its hazard risk");
+  const [wfText,  setWfText]  = useState<string>("Enter your address to see your hazard risk");
 
   // Heatwave (NRI)
   const [heatLevel, setHeatLevel] = useState<RiskLevel | null>(null);
-  const [heatText,  setHeatText]  = useState<string>("Enter any address to see its hazard risk");
+  const [heatText,  setHeatText]  = useState<string>("Enter your address to see your hazard risk");
 
   // Cold Wave (NRI)
   const [coldLevel, setColdLevel] = useState<RiskLevel | null>(null);
-  const [coldText,  setColdText]  = useState<string>("Enter any address to see its hazard risk");
+  const [coldText,  setColdText]  = useState<string>("Enter your address to see your hazard risk");
 
   // Hurricane (NRI)
   const [hurrLevel, setHurrLevel] = useState<RiskLevel | null>(null);
-  const [hurrText,  setHurrText]  = useState<string>("Enter any address to see its hazard risk");
+  const [hurrText,  setHurrText]  = useState<string>("Enter your address to see your hazard risk");
 
   // Tornado (NRI)
   const [torLevel, setTorLevel] = useState<RiskLevel | null>(null);
-  const [torText,  setTorText]  = useState<string>("Enter any address to see its hazard risk");
+  const [torText,  setTorText]  = useState<string>("Enter your address to see your hazard risk");
 
   function parseLatLon(s: string): {lat:number, lon:number} | null {
     const m = s.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -164,7 +165,7 @@ export default function Home() {
         lat = gj.lat; lon = gj.lon;
         const precision = (gj?.precision === "city") ? "city" : "address";
         setGeoPrecision(precision);
-        if (precision === "city") setGeoNote(`ℹ️ Couldn't find the exact address. Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}.`);
+        if (precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
       }
 
       setLoading("fetch");
@@ -309,6 +310,9 @@ export default function Home() {
     );
   }
 
+  // CTA mémo (centroïde)
+  const showMemoCTA = geoPrecision === "city" && loading === "idle" && !error;
+
   // ---------- styles ----------
   const header   = { background: "#121212", color: "#e0e0e0", padding: "28px 16px", textAlign: "center" as const };
   const title    = { fontSize: 32, margin: 0, color: "#e0e0e0" };
@@ -322,7 +326,7 @@ export default function Home() {
 
   const gridWrap = { background: "#e0e0e0", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
   const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 1100, margin: "20px auto" };
-  const card     = { background: "white", border: "1px solid #e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
+  const card     = { background: "white", border: "1px solid "#e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
   const sectionHeader = { padding: 16, borderBottom: "1px solid #e2e8f0", color: "#111827" };
   const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
   const cardBody = { padding: 24 };
@@ -385,7 +389,7 @@ export default function Home() {
       <header style={header}>
         <h1 style={title}>Hazard Risk Checker <span style={beta}>BETA</span></h1>
         <div style={subtitle}>by Hydrau</div>
-        <div style={tagline}>Enter any address to see its hazard risk</div>
+        <div style={tagline}>Enter your address to see your hazard risk</div>
         <div style={bar}>
           <input
             style={input}
@@ -398,7 +402,7 @@ export default function Home() {
             {loading === "idle" ? "Check" : loading === "geocode" ? "Geocoding…" : "Checking…"}
           </button>
         </div>
-        <div style={hint}>Street, city, or county (US only) - It may take up to 45 seconds</div>
+        <div style={hint}>Your street, city, or county (US only)</div>
       </header>
 
       <main style={gridWrap}>
@@ -408,8 +412,35 @@ export default function Home() {
           </div>
         )}
         {geoNote && (
-          <div style={{ maxWidth: 1100, margin: "12px auto 0", background: "#fef3c7", border: "1px solid #f59e0b", color: "#92400e", padding: 10, borderRadius: 6 }}>
-            {geoNote}
+          <div
+            style={{
+              maxWidth: 1100,
+              margin: "12px auto 0",
+              background: "#fef3c7",
+              border: "1px solid #fde68a",
+              color: "#78350f",
+              padding: 10,
+              borderRadius: 6,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>{geoNote}</span>
+
+            {showMemoCTA && (
+              <a
+                href={FIVERR_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={ctaBtnStyle}
+              >
+                <span role="img" aria-hidden>🔎</span>
+                <span>Need more precision?</span>
+              </a>
+            )}
           </div>
         )}
 
