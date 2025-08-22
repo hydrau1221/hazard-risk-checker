@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type React from "react";
 
 type Feature = { attributes: Record<string, any> };
 type RiskLevel =
@@ -8,7 +9,7 @@ type RiskLevel =
   | "Undetermined" | "Not Applicable";
 
 // ====== CONFIG ======
-const FIVERR_URL = "https://fr.fiverr.com/s/dD1zYLG"; // <-- remplace par ton lien Fiverr
+const FIVERR_URL = "https://www.fiverr.com/your_gig_slug"; // <-- remplace par ton lien Fiverr
 
 // Périls qui déclenchent la CTA (si niveau ≥ Moderate)
 const CTA_HAZARDS = new Set(["Flood", "Earthquake", "Landslide", "Wildfire", "Hurricane", "Tornado"]);
@@ -262,7 +263,7 @@ export default function Home() {
       if (torRes.status === "fulfilled") {
         const r = torRes.value; const j = await r.json();
         if (r.ok) { const lvl = (j.level as RiskLevel) ?? "Undetermined"; setTorLevel(lvl); setTorText(formatNri(lvl, j.score, j.tractId || null)); }
-        else { setTorLevel(null); setTorText(j?.error || "NRI tornado query failed."); }
+        else { setTorLevel(null); setTorText("NRI tornado query failed."); }
       } else { setTorLevel(null); setTorText("NRI tornado fetch failed."); }
 
     } catch (e: any) {
@@ -274,14 +275,20 @@ export default function Home() {
 
   // ---------- CTA helpers ----------
   const ctaBtnStyle: React.CSSProperties = {
-    display: "inline-flex", alignItems: "center", gap: 6,
-    padding: "8px 12px", borderRadius: 10,
-    background: "#2d2d2d", color: "#f5f5f5",
-    textDecoration: "none", fontSize: 14, marginTop: 12
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 12px",
+    borderRadius: 10,
+    background: "#2d2d2d",
+    color: "#f5f5f5",
+    textDecoration: "none",
+    fontSize: 14,
+    marginTop: 12,
   };
 
   function shouldShowCTA(hazard: string, lvl: RiskLevel | null) {
-    if (geoPrecision !== "address") return false;            // pas de CTA si centroid
+    if (geoPrecision !== "address") return false; // pas de CTA si centroid
     if (!lvl) return false;
     if (!CTA_HAZARDS.has(hazard)) return false;
     return lvl === "Moderate" || lvl === "High" || lvl === "Very High";
@@ -314,32 +321,46 @@ export default function Home() {
   const showMemoCTA = geoPrecision === "city" && loading === "idle" && !error;
 
   // ---------- styles ----------
-  const header   = { background: "#121212", color: "#e0e0e0", padding: "28px 16px", textAlign: "center" as const };
-  const title    = { fontSize: 32, margin: 0, color: "#e0e0e0" };
-  const beta     = { marginLeft: 8, fontSize: 12, padding: "3px 8px", borderRadius: 999, border: "1px solid #3a3a3a", color: "#cbd5e1" };
-  const subtitle = { opacity: 0.9, marginTop: 6, fontStyle: "italic" as const, color: "#e0e0e0" };
-  const tagline  = { opacity: 0.9, marginTop: 8, color: "#e0e0e0" };
-  const bar      = { display: "flex", justifyContent: "center", gap: 8, marginTop: 16, flexWrap: "wrap" as const, alignItems: "center" };
-  const input    = { width: 520, maxWidth: "92vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" };
-  const btn      = { padding: "10px 16px", borderRadius: 6, border: "1px solid #2d2d2d", background: "#2d2d2d", color: "#e0e0e0", cursor: "pointer" } as any;
-  const hint     = { fontSize: 12, color: "#e0e0e0", opacity: 0.8, marginTop: 6 };
+  const header: React.CSSProperties = { background: "#121212", color: "#e0e0e0", padding: "28px 16px", textAlign: "center" };
+  const title: React.CSSProperties = { fontSize: 32, margin: 0, color: "#e0e0e0" };
+  const beta: React.CSSProperties = { marginLeft: 8, fontSize: 12, padding: "3px 8px", borderRadius: 999, border: "1px solid #3a3a3a", color: "#cbd5e1" };
+  const subtitle: React.CSSProperties = { opacity: 0.9, marginTop: 6, fontStyle: "italic", color: "#e0e0e0" };
+  const tagline: React.CSSProperties = { opacity: 0.9, marginTop: 8, color: "#e0e0e0" };
+  const bar: React.CSSProperties = { display: "flex", justifyContent: "center", gap: 8, marginTop: 16, flexWrap: "wrap", alignItems: "center" };
+  const input: React.CSSProperties = { width: 520, maxWidth: "92vw", padding: "10px 12px", borderRadius: 6, border: "1px solid #cbd5e1" };
+  const btn: React.CSSProperties = { padding: "10px 16px", borderRadius: 6, border: "1px solid #2d2d2d", background: "#2d2d2d", color: "#e0e0e0", cursor: "pointer" };
+  const hint: React.CSSProperties = { fontSize: 12, color: "#e0e0e0", opacity: 0.8, marginTop: 6 };
 
-  const gridWrap = { background: "#e0e0e0", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
-  const grid     = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20, maxWidth: 1100, margin: "20px auto" };
-  const card     = { background: "white", border: "1px solid "#e2e8f0", borderRadius: 8, padding: 0, textAlign: "center" as const, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", overflow: "hidden" };
-  const sectionHeader = { padding: 16, borderBottom: "1px solid #e2e8f0", color: "#111827" };
-  const h2            = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
-  const cardBody = { padding: 24 };
-  const small    = { fontSize: 14, color: "#334155" };
-  const foot     = { fontSize: 12, opacity: 0.7, textAlign: "center" as const, marginTop: 8, color: "#374151" };
+  const gridWrap: React.CSSProperties = { background: "#e0e0e0", minHeight: "calc(100vh - 120px)", padding: "28px 16px" };
+  const grid: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+    gap: 20,
+    maxWidth: 1100,
+    margin: "20px auto",
+  };
+  const card: React.CSSProperties = {
+    background: "white",
+    border: "1px solid #e2e8f0",
+    borderRadius: 8,
+    padding: 0,
+    textAlign: "center",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+    overflow: "hidden",
+  };
+  const sectionHeader: React.CSSProperties = { padding: 16, borderBottom: "1px solid #e2e8f0", color: "#111827" };
+  const h2: React.CSSProperties = { margin: "0 0 10px 0", fontSize: 22, color: "#111827" };
+  const cardBody: React.CSSProperties = { padding: 24 };
+  const small: React.CSSProperties = { fontSize: 14, color: "#334155" };
+  const foot: React.CSSProperties = { fontSize: 12, opacity: 0.7, textAlign: "center", marginTop: 8, color: "#374151" };
 
-  const coloredHeader = (lvl: RiskLevel) => ({
+  const coloredHeader = (lvl: RiskLevel): React.CSSProperties => ({
     background: PALETTE[lvl].bg,
     color: PALETTE[lvl].text,
     borderBottom: `1px solid ${PALETTE[lvl].border}`,
     padding: "18px 16px",
   });
-  const badge = (lvl: RiskLevel) => ({
+  const badge = (lvl: RiskLevel): React.CSSProperties => ({
     display: "inline-block",
     padding: "6px 10px",
     borderRadius: 999,
