@@ -95,35 +95,35 @@ export default function Home() {
 
   // Flood
   const [floodLevel, setFloodLevel] = useState<RiskLevel | null>(null);
-  const [floodText, setFloodText]   = useState<string>("Enter your address to see your hazard risk");
+  const [floodText, setFloodText]   = useState<string>("Enter any address to see its hazard risk");
 
   // Earthquake
   const [eqLevel, setEqLevel] = useState<RiskLevel | null>(null);
-  const [eqText,  setEqText]  = useState<string>("Enter your address to see your hazard risk");
+  const [eqText,  setEqText]  = useState<string>("Enter any address to see its hazard risk");
 
   // Landslide (NRI)
   const [lsLevel, setLsLevel] = useState<RiskLevel | null>(null);
-  const [lsText,  setLsText]  = useState<string>("Enter your address to see your hazard risk");
+  const [lsText,  setLsText]  = useState<string>("Enter any address to see its hazard risk");
 
   // Wildfire (NRI)
   const [wfLevel, setWfLevel] = useState<RiskLevel | null>(null);
-  const [wfText,  setWfText]  = useState<string>("Enter your address to see your hazard risk");
+  const [wfText,  setWfText]  = useState<string>("Enter any address to see its hazard risk");
 
   // Heatwave (NRI)
   const [heatLevel, setHeatLevel] = useState<RiskLevel | null>(null);
-  const [heatText,  setHeatText]  = useState<string>("Enter your address to see your hazard risk");
+  const [heatText,  setHeatText]  = useState<string>("Enter any address to see its hazard risk");
 
   // Cold Wave (NRI)
   const [coldLevel, setColdLevel] = useState<RiskLevel | null>(null);
-  const [coldText,  setColdText]  = useState<string>("Enter your address to see your hazard risk");
+  const [coldText,  setColdText]  = useState<string>("Enter any address to see its hazard risk");
 
   // Hurricane (NRI)
   const [hurrLevel, setHurrLevel] = useState<RiskLevel | null>(null);
-  const [hurrText,  setHurrText]  = useState<string>("Enter your address to see your hazard risk");
+  const [hurrText,  setHurrText]  = useState<string>("Enter any address to see its hazard risk");
 
   // Tornado (NRI)
   const [torLevel, setTorLevel] = useState<RiskLevel | null>(null);
-  const [torText,  setTorText]  = useState<string>("Enter your address to see your hazard risk");
+  const [torText,  setTorText]  = useState<string>("Enter any address to see its hazard risk");
 
   function parseLatLon(s: string): {lat:number, lon:number} | null {
     const m = s.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -410,7 +410,7 @@ export default function Home() {
       <header style={header}>
         <h1 style={title}>Hazard Risk Checker <span style={beta}>BETA</span></h1>
         <div style={subtitle}>by Hydrau</div>
-        <div style={tagline}>Enter your address to see your hazard risk</div>
+        <div style={tagline}>Enter any address to see its hazard risk</div>
         <div style={bar}>
           <input
             style={input}
@@ -423,7 +423,7 @@ export default function Home() {
             {loading === "idle" ? "Check" : loading === "geocode" ? "Geocoding…" : "Checking…"}
           </button>
         </div>
-        <div style={hint}>Your street, city, or county (US only)</div>
+        <div style={hint}>Street, city, or county (US only) - It may take up to 45 seconds </div>
       </header>
 
       <main style={gridWrap}>
