@@ -166,7 +166,7 @@ export default function Home() {
         lat = gj.lat; lon = gj.lon;
         const precision = (gj?.precision === "city") ? "city" : "address";
         setGeoPrecision(precision);
-        if (precision === "city") setGeoNote(`Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}. Results are generalized.`);
+        if (precision === "city") setGeoNote(`Exact address not found. Using city centroid${gj?.placeLabel ? `: ${gj.placeLabel}` : ""}.`);
       }
 
       setLoading("fetch");
