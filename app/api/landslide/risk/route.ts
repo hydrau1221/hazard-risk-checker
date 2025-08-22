@@ -120,7 +120,7 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
   if (pWithin.ok && pWithin.attrs) return { pick: pWithin, attempts };
 
   // 2) Point INTERSECTS avec tolérance (3m → 7m → 15m → 30m)
-  for (const d of [3, 7, 15, 30]) {
+  for (const d of [3, 7, 15, 50]) {
     const pInter = await query(feature0Url, {
       geometry: JSON.stringify({ x: lon, y: lat }),
       geometryType: "esriGeometryPoint",
