@@ -18,6 +18,22 @@ const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; bord
   "Not Applicable": { bg: "#f1f5f9", badge: "#64748b", text: "#334155", border: "#cbd5e1" },
 };
 
+// ====== CONFIG ======
+const FIVERR_URL = "https://fr.fiverr.com/s/dD1zYLG"; // le  lien Fiverr
+
+// Périls qui déclenchent la CTA (si niveau ≥ Moderate)
+const CTA_HAZARDS = new Set(["Flood", "Earthquake", "Landslide", "Wildfire", "Hurricane", "Tornado"]);
+
+const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
+  "Very Low":   { bg: "#dcfce7", badge: "#16a34a", text: "#14532d", border: "#86efac" },
+  Low:          { bg: "#dbeafe", badge: "#1d4ed8", text: "#0c4a6e", border: "#93c5fd" },
+  Moderate:     { bg: "#fef9c3", badge: "#ca8a04", text: "#854d0e", border: "#fde68a" },
+  High:         { bg: "#ffedd5", badge: "#ea580c", text: "#7c2d12", border: "#fdba74" },
+  "Very High":  { bg: "#fee2e2", badge: "#dc2626", text: "#7f1d1d", border: "#fecaca" },
+  Undetermined: { bg: "#f3f4f6", badge: "#6b7280", text: "#374151", border: "#d1d5db" },
+  "Not Applicable": { bg: "#f1f5f9", badge: "#64748b", text: "#334155", border: "#cbd5e1" },
+};
+
 // ---------- Flood classification ----------
 function classifyFlood(features: Feature[] | null): {
   level: RiskLevel; zone: string; sfha: boolean; bfe: string | null; note: string;
