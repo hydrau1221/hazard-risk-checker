@@ -476,10 +476,25 @@ export default function Home() {
           {torCard}
         </div>
 
-        <div style={foot}>
-          ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Wildfire, Heatwave, Cold Wave, Tornado).
-        </div>
-      </main>
-    </div>
-  );
-}
+       <div style={foot}>
+  ⚠️ Informational tool. Sources: FEMA NFHL (Flood) • USGS Design Maps (Earthquake, Risk Cat I) • FEMA NRI (Landslide, Wildfire, Heatwave, Cold Wave, Tornado).
+</div>
+
+<div style={foot}>
+  © 2025 Hydrau — Educational project • Privacy-friendly, no tracking.
+</div>
+
+<div style={{ ...foot, display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="#0a66c2" aria-hidden="true">
+    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.026-3.037-1.852-3.037-1.853 0-2.136 1.447-2.136 2.941v5.665H9.351V9h3.414v1.561h.049c.476-.9 1.637-1.852 3.368-1.852 3.6 0 4.266 2.371 4.266 5.455v6.288zM5.337 7.433a2.062 2.062 0 1 1 0-4.125 2.062 2.062 0 0 1 0 4.125zM6.95 20.452H3.72V9H6.95v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.226.792 24 1.771 24h20.451C23.2 24 24 23.226 24 22.271V1.729C24 .774 23.2 0 22.225 0z"/>
+  </svg>
+  <a
+    href="https://www.linkedin.com/in/hydrau-830122327/"
+    target="_blank"
+    rel="noopener noreferrer"
+    style={{ color: "#0a66c2", textDecoration: "none", fontWeight: 600 }}
+  >
+    Find me on LinkedIn
+  </a>
+</div>
+
