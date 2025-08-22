@@ -225,7 +225,7 @@ export default function Home() {
       // Landslide (NRI)
       if (lsRes.status === "fulfilled") {
         const r = lsRes.value; const j = await r.json();
-        if (r.ok) { const lvl = ((j.level as RiskLevel) === "Undetermined" ? "Very Low" : (j.level as RiskLevel)) ?? "Undetermined"; setLsLevel(lvl); setLsText(formatNri(lvl, j.score, j.tractId || null)); }
+        if (r.ok) { const lvl = (j.level as RiskLevel) ?? "Undetermined"; setLsLevel(lvl); setLsText(formatNri(lvl, j.score, j.tractId || null)); }
         else { setLsLevel(null); setLsText(j?.error || "NRI landslide query failed."); }
       } else { setLsLevel(null); setLsText("NRI landslide fetch failed."); }
 
