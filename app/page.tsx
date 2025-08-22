@@ -311,7 +311,7 @@ export default function Home() {
       <div>
         <a href={buildFiverrUrl(hazard, lvl)} target="_blank" rel="noopener noreferrer" style={ctaBtnStyle} aria-label={`Get help for ${hazard} risk`}>
           <span role="img" aria-hidden>🔎</span>
-          <span>Need help?</span>
+          <span>Get full report</span>
         </a>
       </div>
     );
@@ -459,7 +459,7 @@ export default function Home() {
                 style={ctaBtnStyle}
               >
                 <span role="img" aria-hidden>🔎</span>
-                <span>Need more precision?</span>
+                <span>Request detailed report</span>
               </a>
             )}
           </div>
