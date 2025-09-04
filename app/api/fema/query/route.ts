@@ -38,7 +38,7 @@ async function getLayerId(): Promise<number> {
   return Number.isFinite(found?.id) ? found.id : 28; // fallback si vraiment introuvable
 }
 
-function envelopeAround(lon: number, lat: number, eps = 0.01) {
+function envelopeAround(lon: number, lat: number, eps = 0.03) {
   return { xmin: lon - eps, ymin: lat - eps, xmax: lon + eps, ymax: lat + eps, spatialReference: { wkid: 4326 } };
 }
 
