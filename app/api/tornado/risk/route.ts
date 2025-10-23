@@ -45,14 +45,14 @@ function mapLabelToLevel(raw: unknown): Level {
 /** Extrait label/score pour Tornado, avec fallback niveau ← score si label manquant */
 function extractTornado(attrs: Record<string, any>) {
   // Champs tolérants: TORN_RISKR / TORNADO_RISKR et TORN_RISKS / TORNADO_RISKS
-  const riskR = findAttr(attrs, [/(?:^|_)TORN(?:ADO)?_RISKR$/i]);
-  let  riskS = findAttr(attrs, [/(?:^|_)TORN(?:ADO)?_RISKS$/i]);
+const riskR = findAttr(attrs, [/(?:^|_)(?:TRND|TORN(?:ADO)?)_RISKR$/i]);
+let  riskS = findAttr(attrs, [/(?:^|_)(?:TRND|TORN(?:ADO)?)_RISKS$/i]);
 
   // Couverture de variantes (évite RISKR/RANK/PCTL/INDEX)
   if (!riskS) {
     const cand = Object.keys(attrs).find((k) => {
       const up = k.toUpperCase();
-      return /(TORN|TORNADO)/.test(up) &&
+      return /(TRND|TORN|TORNADO)/.test(up) &&
         up.endsWith("RISKS") &&
         !up.includes("RISKR") &&
         !up.includes("RANK") &&
