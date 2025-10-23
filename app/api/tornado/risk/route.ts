@@ -80,7 +80,7 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
   attempts.push({ step: "point:within", url: (pWithin as any).url });
   if (pWithin.ok && pWithin.attrs) return { pick: pWithin, attempts };
 
-  for (const d of [3, 7, 15, 30]) {
+  for (const d of [3, 7, 15, 30, 50]) {
     const pInter = await query(feature0Url, {
       geometry: JSON.stringify({ x: lon, y: lat }), geometryType: "esriGeometryPoint", inSR: "4326",
       spatialRel: "esriSpatialRelIntersects", distance: String(d), units: "esriSRUnit_Meter",
@@ -89,7 +89,7 @@ async function pickFeature(feature0Url: string, lon: number, lat: number) {
     if (pInter.ok && pInter.attrs) return { pick: pInter, attempts };
   }
 
-  const env = tinyEnvelope(lon, lat, 50);
+  const env = tinyEnvelope(lon, lat, 1000);
   const eInter = await query(feature0Url, {
     geometry: JSON.stringify({ xmin: env.xmin, ymin: env.ymin, xmax: env.xmax, ymax: env.ymax, spatialReference: { wkid: 4326 } }),
     geometryType: "esriGeometryEnvelope", inSR: "4326", spatialRel: "esriSpatialRelIntersects",
