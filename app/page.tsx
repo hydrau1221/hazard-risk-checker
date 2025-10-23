@@ -12,7 +12,7 @@ type RiskLevel =
 const FIVERR_URL = "https://fr.fiverr.com/s/dD1zYLG"; // <-- remplace par ton lien Fiverr
 
 // Périls qui déclenchent la CTA (si niveau ≥ Moderate)
-const CTA_HAZARDS = new Set(["Flood", "Earthquake", "Landslide", "Wildfire", "Hurricane", "Tornado"]);
+const CTA_HAZARDS = new Set(["Flood", "Earthquake", "Landslide", "Wildfire", "Hurricane"]);
 
 // Palette unique (inclut Not Applicable)
 const PALETTE: Record<RiskLevel, { bg: string; badge: string; text: string; border: string }> = {
